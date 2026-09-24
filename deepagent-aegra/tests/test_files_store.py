@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from agent.files.store import load, save, store_output_bytes
+from agent.files.store import load, resolve_attachment_bytes, save, store_output_bytes
 
 
 def test_save_returns_a_uuid4_key_carrying_the_original_extension(tmp_path: Path):
@@ -89,3 +89,25 @@ def test_store_output_bytes_writes_under_the_configured_file_store_dir(
 
     assert key.endswith(".xlsx")
     assert (tmp_path / key).read_bytes() == b"workbook bytes"
+
+
+def test_resolve_attachment_bytes_reads_under_the_configured_file_store_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setenv("OLLAMA_MODEL", "gpt-oss:20b")
+    monkeypatch.setenv("OLLAMA_CONTEXT_WINDOW", "32768")
+    monkeypatch.setenv("FILE_STORE_DIR", str(tmp_path))
+    key = save(tmp_path, "attachment.pdf", b"pdf bytes")
+
+    assert resolve_attachment_bytes(key) == b"pdf bytes"
+
+
+def test_resolve_attachment_bytes_of_an_unknown_key_raises_key_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setenv("OLLAMA_MODEL", "gpt-oss:20b")
+    monkeypatch.setenv("OLLAMA_CONTEXT_WINDOW", "32768")
+    monkeypatch.setenv("FILE_STORE_DIR", str(tmp_path))
+
+    with pytest.raises(KeyError):
+        resolve_attachment_bytes("does-not-exist.pdf")

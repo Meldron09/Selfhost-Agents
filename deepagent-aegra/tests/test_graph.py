@@ -44,12 +44,12 @@ def test_a_trivial_run_replies():
     assert result["messages"][-1].content == "hello there"
 
 
-def test_output_writer_is_registered_but_file_reader_and_web_search_are_not():
-    """This ticket's own scope: orchestrator + `output-writer` (#16).
+def test_output_writer_and_file_reader_are_registered_but_web_search_is_not():
+    """This ticket's own scope: orchestrator + `output-writer` (#16) + `file-reader` (#17).
 
     `task`/`general-purpose` are deepagents' own built-in delegation
-    capability and come for free regardless. `file-reader`/`web-search` are
-    later tickets (#17, #18) and must not be registered yet.
+    capability and come for free regardless. `web-search` is a later ticket
+    (#18) and must not be registered yet.
     """
     def responder(messages, tools):
         seen = [
@@ -63,7 +63,7 @@ def test_output_writer_is_registered_but_file_reader_and_web_search_are_not():
                 content="",
                 tool_calls=[{
                     "name": "task",
-                    "args": {"description": "read a file", "subagent_type": "file-reader"},
+                    "args": {"description": "search the web", "subagent_type": "web-search"},
                     "id": "c1",
                 }],
             )
@@ -75,9 +75,10 @@ def test_output_writer_is_registered_but_file_reader_and_web_search_are_not():
         config={"configurable": {"thread_id": "t2"}},
     )
     tool_outputs = [m.content for m in result["messages"] if getattr(m, "type", None) == "tool"]
-    assert any("does not exist" in str(out) and "output-writer" in str(out) for out in tool_outputs), (
-        tool_outputs
-    )
+    assert any(
+        "does not exist" in str(out) and "output-writer" in str(out) and "file-reader" in str(out)
+        for out in tool_outputs
+    ), tool_outputs
 
 
 def test_a_given_checkpointer_persists_state_across_invocations():
@@ -110,6 +111,42 @@ def test_summarization_trigger_falls_back_to_absolute_tokens_with_no_profile():
     # ScriptedChatModel declares no `.profile` — same shape as any model
     # plane that doesn't expose one.
     assert _summarization_trigger(ScriptedChatModel()) == ("tokens", 150_000)
+
+
+# --- attachment acknowledgment (#17) --------------------------------------
+
+
+def test_orchestrator_sees_attachment_filenames_via_the_acknowledge_middleware():
+    """`AttachmentAcknowledgeMiddleware` is wired into `build_agent`, not just
+    unit-tested in isolation (tests/test_attachment_ack.py).
+    """
+    def responder(messages, tools):
+        visible = "\n".join(str(m.content) for m in messages)
+        assert "revenue.xlsx" in visible
+        return AIMessage(content='I see "revenue.xlsx" was attached.')
+
+    agent = build_agent(model=ScriptedChatModel(responder=responder), settings=_TEST_SETTINGS)
+    result = agent.invoke(
+        {
+            "messages": [HumanMessage(content="what's the total?")],
+            "attachments": [{"key": "a1.xlsx", "filename": "revenue.xlsx"}],
+        },
+        config={"configurable": {"thread_id": "t-ack"}},
+    )
+    assert "revenue.xlsx" in result["messages"][-1].content
+
+
+def test_no_attachments_means_no_note_in_the_system_message():
+    def responder(messages, tools):
+        visible = "\n".join(str(m.content) for m in messages)
+        assert "Attachments available" not in visible
+        return AIMessage(content="hi there")
+
+    agent = build_agent(model=ScriptedChatModel(responder=responder), settings=_TEST_SETTINGS)
+    agent.invoke(
+        {"messages": [HumanMessage(content="hi")]},
+        config={"configurable": {"thread_id": "t-no-attachments"}},
+    )
 
 
 # --- REQUIRE_APPROVAL (docs/adr/0005, point 5: empty gate set) -----------

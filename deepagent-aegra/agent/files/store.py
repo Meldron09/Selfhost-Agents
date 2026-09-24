@@ -46,10 +46,20 @@ def load(root: Path, key: str) -> bytes:
 
 
 def store_output_bytes(filename: str, data: bytes) -> str:
-    """`output-writer`'s write-side mirror of the (later) `resolve_attachment_bytes`.
+    """`output-writer`'s write-side mirror of `resolve_attachment_bytes`.
 
     Reads settings at call time, not import time — same convention as every
     other settings access in this project (`aegra serve` loads `.env` after
     import; tests monkeypatch the environment between cases).
     """
     return save(get_settings().file_store_dir, filename, data)
+
+
+def resolve_attachment_bytes(key: str) -> bytes:
+    """`file-reader`'s read-side mirror of `store_output_bytes`.
+
+    Raises `KeyError` if `key` doesn't resolve — `agent/file_reader.py`'s
+    tools catch this and turn it into an explicit tool-level error, never
+    letting it propagate as a raised exception into the model loop.
+    """
+    return load(get_settings().file_store_dir, key)

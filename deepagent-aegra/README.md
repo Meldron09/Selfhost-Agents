@@ -5,8 +5,9 @@ An independent deepagents multi-agent demo, self-hosted on `aegra` (mirroring
 `CONTEXT.md` for the domain vocabulary and `docs/adr/` for the decisions
 behind it.
 
-The orchestrator delegates every file it produces to `output-writer` ([#16](https://github.com/Meldron09/Selfhost-Agents/issues/16)).
-`file-reader` and `web-search` are later tickets. See the parent spec:
+The orchestrator delegates every file it produces to `output-writer` ([#16](https://github.com/Meldron09/Selfhost-Agents/issues/16))
+and every Attachment it's given to `file-reader` ([#17](https://github.com/Meldron09/Selfhost-Agents/issues/17)).
+`web-search` is a later ticket. See the parent spec:
 [#13](https://github.com/Meldron09/Selfhost-Agents/issues/13).
 
 ## Commands
@@ -36,9 +37,16 @@ The orchestrator delegates every file it produces to `output-writer` ([#16](http
   persists through its own Postgres-backed saver instead
 - `agent/scripted_model.py` — the test-only model, ported from
   `agent-runtime` (docs/adr/0005)
-- `agent/state.py` — the custom `outputs` graph-state field (docs/adr/0001)
+- `agent/state.py` — the custom `outputs`/`attachments` graph-state fields
+  (docs/adr/0001)
 - `agent/output_writer.py` — the `output-writer` subagent's four write tools
   (`write_xlsx`/`write_docx`/`write_pptx`/`write_txt`) and system prompt
+- `agent/file_reader.py` — the `file-reader` subagent's five read tools
+  (`read_pdf`/`read_xlsx`/`read_docx`/`read_pptx`/`read_txt`) and system
+  prompt
+- `agent/attachment_ack.py` — the middleware that surfaces `attachments` to
+  the orchestrator's own model calls, so it can acknowledge them by name
+  (docs/adr/0006)
 - `agent/subagents.py` — assembles the subagents the orchestrator's `task`
   tool can delegate to
 - `agent/files/` — the upload/download HTTP app (`/files`), mounted
