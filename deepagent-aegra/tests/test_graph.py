@@ -2,7 +2,12 @@
 from __future__ import annotations
 
 import pytest
-from langchain.agents.middleware import HumanInTheLoopMiddleware
+from langchain.agents.middleware import (
+    HumanInTheLoopMiddleware,
+    ModelCallLimitMiddleware,
+    TodoListMiddleware,
+    ToolRetryMiddleware,
+)
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph.state import CompiledStateGraph
@@ -187,3 +192,45 @@ def test_a_scripted_run_with_require_approval_true_never_pauses():
     )
     assert "__interrupt__" not in result
     assert result["messages"][-1].content == "hello"
+
+
+# --- carried-over long-run backstops (ported from agent-runtime) ---------
+
+
+def test_todo_list_middleware_installed_by_default():
+    middleware = _build_middleware(_TEST_SETTINGS, ScriptedChatModel())
+    assert any(isinstance(m, TodoListMiddleware) for m in middleware)
+
+
+def test_todo_list_middleware_can_be_disabled():
+    settings = Settings(ollama_model="m", ollama_context_window=8192, enable_todos=False)
+    middleware = _build_middleware(settings, ScriptedChatModel())
+    assert not any(isinstance(m, TodoListMiddleware) for m in middleware)
+
+
+def test_tool_retry_middleware_uses_the_configured_retry_count():
+    settings = Settings(ollama_model="m", ollama_context_window=8192, tool_retries=5)
+    middleware = _build_middleware(settings, ScriptedChatModel())
+    retry = [m for m in middleware if isinstance(m, ToolRetryMiddleware)]
+    assert len(retry) == 1
+    assert retry[0].max_retries == 5
+
+
+def test_model_call_limit_middleware_uses_the_configured_limit():
+    settings = Settings(ollama_model="m", ollama_context_window=8192, model_call_limit=7)
+    middleware = _build_middleware(settings, ScriptedChatModel())
+    limit = [m for m in middleware if isinstance(m, ModelCallLimitMiddleware)]
+    assert len(limit) == 1
+    assert limit[0].run_limit == 7
+
+
+def test_a_scripted_run_still_completes_with_all_carried_over_middleware_installed():
+    # Proves the full default middleware stack (todos, retry, call-limit,
+    # summarization, attachment-ack, web-search-gate) composes into a graph
+    # that actually runs, not just one that builds.
+    agent = build_agent(model=ScriptedChatModel(final_text="hello there"), settings=_TEST_SETTINGS)
+    result = agent.invoke(
+        {"messages": [HumanMessage(content="hi")]},
+        config={"configurable": {"thread_id": "t-full-stack"}},
+    )
+    assert result["messages"][-1].content == "hello there"

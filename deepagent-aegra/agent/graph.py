@@ -4,7 +4,13 @@
 from __future__ import annotations
 
 from deepagents import create_deep_agent
-from langchain.agents.middleware import HumanInTheLoopMiddleware, SummarizationMiddleware
+from langchain.agents.middleware import (
+    HumanInTheLoopMiddleware,
+    ModelCallLimitMiddleware,
+    SummarizationMiddleware,
+    TodoListMiddleware,
+    ToolRetryMiddleware,
+)
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.language_models.chat_models import BaseChatModel
 from langgraph.checkpoint.base import BaseCheckpointSaver
@@ -58,14 +64,21 @@ def _summarization_trigger(model: BaseChatModel) -> tuple[str, float] | tuple[st
 def _build_middleware(settings: Settings, model: BaseChatModel) -> list[AgentMiddleware]:
     """The orchestrator's own middleware stack: `AttachmentAcknowledgeMiddleware`
     (docs/adr/0006) and `WebSearchGateMiddleware` (docs/adr/0007), both new to
-    this project, plus `HumanInTheLoopMiddleware`/`SummarizationMiddleware`,
-    which are carried over from `agent-runtime` and trimmed to what this
-    project actually needs (docs/adr/0005, point 5).
+    this project, plus `TodoListMiddleware`/`HumanInTheLoopMiddleware`/
+    `SummarizationMiddleware`/`ToolRetryMiddleware`/`ModelCallLimitMiddleware`,
+    ported directly from `agent-runtime/agent/graph.py`'s own
+    `_build_middleware` — deepagents does not install planning, retry, or
+    call-limit behaviour itself, so without these a long or flaky run has no
+    backstop.
     """
     middleware: list[AgentMiddleware] = [
         AttachmentAcknowledgeMiddleware(),
         WebSearchGateMiddleware(),
     ]
+
+    if settings.enable_todos:
+        # Capability: planning. Supplies `write_todos`.
+        middleware.append(TodoListMiddleware())
 
     if settings.require_approval:
         # Carried over with an empty gate set: no tool in this design is
@@ -74,15 +87,29 @@ def _build_middleware(settings: Settings, model: BaseChatModel) -> list[AgentMid
         # configured to gate.
         middleware.append(HumanInTheLoopMiddleware(interrupt_on={}))
 
-    # A long run can exceed the context window. Compact the history near the
-    # limit and keep the recent turns verbatim, rather than failing the run
-    # at the point it becomes valuable.
-    middleware.append(
-        SummarizationMiddleware(
-            model=model,
-            trigger=_summarization_trigger(model),
-            keep=("messages", _KEEP_LAST_MESSAGES),
-        )
+    middleware.extend(
+        [
+            # A long run can exceed the context window. Compact the history
+            # near the limit and keep the recent turns verbatim, rather than
+            # failing the run at the point it becomes valuable.
+            SummarizationMiddleware(
+                model=model,
+                trigger=_summarization_trigger(model),
+                keep=("messages", _KEEP_LAST_MESSAGES),
+            ),
+            # Search and file I/O calls fail transiently; a retry is cheaper
+            # than losing an otherwise-complete run.
+            ToolRetryMiddleware(
+                max_retries=settings.tool_retries,
+                on_failure="continue",
+            ),
+            # Backstop against a loop that plans forever. `end` stops cleanly
+            # with whatever has been produced instead of raising.
+            ModelCallLimitMiddleware(
+                run_limit=settings.model_call_limit,
+                exit_behavior="end",
+            ),
+        ]
     )
 
     return middleware

@@ -54,6 +54,13 @@ def _env_bool(name: str, default: bool) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _env_int(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return default
+    return int(raw)
+
+
 @dataclass(frozen=True)
 class Settings:
     """Resolved runtime settings."""
@@ -79,6 +86,19 @@ class Settings:
     # docs/adr/0005-testing-strategy-carryover-from-agent-runtime.md, point 5.
     require_approval: bool = False
 
+    # --- planning / delegation --------------------------------------------
+    # Ported from agent-runtime/agent/config.py: deepagents does not install
+    # planning behaviour itself, so without this flag there is no way to
+    # turn `write_todos` off (see agent/graph.py's `_build_middleware`).
+    enable_todos: bool = True
+
+    # --- long-run behaviour -------------------------------------------------
+    # Ported from agent-runtime/agent/config.py: backstops for a run whose
+    # tool calls fail transiently or that loops without ending (see
+    # agent/graph.py's `_build_middleware`).
+    tool_retries: int = 2
+    model_call_limit: int = 400
+
     @classmethod
     def from_env(cls) -> "Settings":
         return cls(
@@ -87,6 +107,9 @@ class Settings:
             ollama_base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").strip(),
             file_store_dir=_abs_path("FILE_STORE_DIR", "./data"),
             require_approval=_env_bool("REQUIRE_APPROVAL", False),
+            enable_todos=_env_bool("ENABLE_TODOS", True),
+            tool_retries=_env_int("TOOL_RETRIES", 2),
+            model_call_limit=_env_int("MODEL_CALL_LIMIT", 400),
         )
 
 
