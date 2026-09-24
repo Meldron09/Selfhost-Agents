@@ -47,6 +47,13 @@ def _require_int(name: str) -> int:
         raise RuntimeError(msg) from exc
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
 @dataclass(frozen=True)
 class Settings:
     """Resolved runtime settings."""
@@ -66,6 +73,12 @@ class Settings:
     # round-trip check of it.
     file_store_dir: Path = field(default_factory=lambda: Path("./data"))
 
+    # --- human in the loop ------------------------------------------------
+    # Carried over from agent-runtime with an empty gate set: no tool in this
+    # design is approval-gated, so this flag is inert but present — see
+    # docs/adr/0005-testing-strategy-carryover-from-agent-runtime.md, point 5.
+    require_approval: bool = False
+
     @classmethod
     def from_env(cls) -> "Settings":
         return cls(
@@ -73,6 +86,7 @@ class Settings:
             ollama_context_window=_require_int("OLLAMA_CONTEXT_WINDOW"),
             ollama_base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").strip(),
             file_store_dir=_abs_path("FILE_STORE_DIR", "./data"),
+            require_approval=_env_bool("REQUIRE_APPROVAL", False),
         )
 
 

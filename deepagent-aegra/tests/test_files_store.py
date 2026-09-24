@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from agent.files.store import load, save
+from agent.files.store import load, save, store_output_bytes
 
 
 def test_save_returns_a_uuid4_key_carrying_the_original_extension(tmp_path: Path):
@@ -76,3 +76,16 @@ def test_load_refuses_a_bare_dot_dot_key(tmp_path: Path):
 
     with pytest.raises(KeyError):
         load(root, "..")
+
+
+def test_store_output_bytes_writes_under_the_configured_file_store_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setenv("OLLAMA_MODEL", "gpt-oss:20b")
+    monkeypatch.setenv("OLLAMA_CONTEXT_WINDOW", "32768")
+    monkeypatch.setenv("FILE_STORE_DIR", str(tmp_path))
+
+    key = store_output_bytes("report.xlsx", b"workbook bytes")
+
+    assert key.endswith(".xlsx")
+    assert (tmp_path / key).read_bytes() == b"workbook bytes"

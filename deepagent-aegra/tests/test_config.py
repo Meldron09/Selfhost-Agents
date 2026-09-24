@@ -52,3 +52,17 @@ def test_file_store_dir_defaults_and_is_absolute(monkeypatch: pytest.MonkeyPatch
     settings = get_settings()
     assert settings.file_store_dir.is_absolute()
     assert settings.file_store_dir.name == "data"
+
+
+def test_require_approval_defaults_to_false(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("OLLAMA_MODEL", "gpt-oss:20b")
+    monkeypatch.setenv("OLLAMA_CONTEXT_WINDOW", "32768")
+    monkeypatch.delenv("REQUIRE_APPROVAL", raising=False)
+    assert get_settings().require_approval is False
+
+
+def test_require_approval_parses_true(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("OLLAMA_MODEL", "gpt-oss:20b")
+    monkeypatch.setenv("OLLAMA_CONTEXT_WINDOW", "32768")
+    monkeypatch.setenv("REQUIRE_APPROVAL", "true")
+    assert get_settings().require_approval is True

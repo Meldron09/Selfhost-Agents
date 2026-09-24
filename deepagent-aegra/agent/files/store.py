@@ -11,6 +11,8 @@ from __future__ import annotations
 import uuid
 from pathlib import Path
 
+from agent.config import get_settings
+
 
 def save(root: Path, filename: str, data: bytes) -> str:
     """Write `data` under `root` as a fresh key; returns that key."""
@@ -41,3 +43,13 @@ def load(root: Path, key: str) -> bytes:
     if not path.is_file():
         raise KeyError(key)
     return path.read_bytes()
+
+
+def store_output_bytes(filename: str, data: bytes) -> str:
+    """`output-writer`'s write-side mirror of the (later) `resolve_attachment_bytes`.
+
+    Reads settings at call time, not import time — same convention as every
+    other settings access in this project (`aegra serve` loads `.env` after
+    import; tests monkeypatch the environment between cases).
+    """
+    return save(get_settings().file_store_dir, filename, data)

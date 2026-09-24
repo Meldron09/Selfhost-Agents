@@ -76,8 +76,10 @@ def _run_guarded(coro_factory):
     return asyncio.run(main())
 
 
-def test_graph_construction_makes_no_blocking_calls():
+def test_graph_construction_makes_no_blocking_calls(monkeypatch: pytest.MonkeyPatch):
     """`make_agent` runs on the event loop — it must be syscall-free."""
+    monkeypatch.setenv("OLLAMA_MODEL", "test-model")
+    monkeypatch.setenv("OLLAMA_CONTEXT_WINDOW", "32768")
 
     async def build():
         return build_agent(model=ScriptedChatModel(final_text="hi"))
@@ -86,7 +88,7 @@ def test_graph_construction_makes_no_blocking_calls():
     assert agent is not None
 
 
-def test_a_tool_using_run_makes_no_blocking_calls_from_our_code():
+def test_a_tool_using_run_makes_no_blocking_calls_from_our_code(monkeypatch: pytest.MonkeyPatch):
     """A full run — plan, write a file — stays loop-safe.
 
     The default backend for a graph with no `backend=` argument is
@@ -95,6 +97,8 @@ def test_a_tool_using_run_makes_no_blocking_calls_from_our_code():
     (`agent/config.py`, `agent/model.py`, `agent/graph.py`) — not that the
     file tools themselves are safe, which is deepagents' own concern.
     """
+    monkeypatch.setenv("OLLAMA_MODEL", "test-model")
+    monkeypatch.setenv("OLLAMA_CONTEXT_WINDOW", "32768")
 
     def responder(messages, tools):
         seen = [
@@ -126,6 +130,61 @@ def test_a_tool_using_run_makes_no_blocking_calls_from_our_code():
 
     tool_outputs = [m.content for m in result["messages"] if getattr(m, "type", None) == "tool"]
     assert any("hello.txt" in str(out) for out in tool_outputs), tool_outputs
+
+
+def test_output_writer_run_makes_no_blocking_calls_from_our_code(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+):
+    """docs/adr/0005, point 8: the guard extends to the new file-I/O paths
+    (`store_output_bytes`, reached here via `task` → `output-writer` →
+    `write_xlsx`) — same reasoning as `write_file` above: `ToolNode` always
+    runs a sync tool off the event loop, in its own executor thread.
+    """
+    monkeypatch.setenv("OLLAMA_MODEL", "test-model")
+    monkeypatch.setenv("OLLAMA_CONTEXT_WINDOW", "32768")
+    monkeypatch.setenv("FILE_STORE_DIR", str(tmp_path))
+
+    def responder(messages, tools):
+        seen = [
+            call["name"]
+            for m in messages
+            if isinstance(m, AIMessage)
+            for call in (m.tool_calls or [])
+        ]
+        if "task" in tools:
+            if "task" not in seen:
+                return AIMessage(
+                    content="",
+                    tool_calls=[{
+                        "name": "task",
+                        "args": {"description": "write a text note", "subagent_type": "output-writer"},
+                        "id": "orch-1",
+                    }],
+                )
+            return AIMessage(content=str(messages[-1].content))
+        if "write_txt" not in seen:
+            return AIMessage(
+                content="",
+                tool_calls=[{
+                    "name": "write_txt",
+                    "args": {"name": "note", "text": "hi"},
+                    "id": "ow-1",
+                }],
+            )
+        return AIMessage(content="Wrote note.txt.")
+
+    agent = build_agent(model=ScriptedChatModel(responder=responder))
+
+    async def run():
+        return await agent.ainvoke(
+            {"messages": [HumanMessage(content="write me a note")]},
+            config={"configurable": {"thread_id": "t-block-ow"}, "recursion_limit": 20},
+        )
+
+    result = _run_guarded(run)
+
+    assert result["outputs"] == [{"key": result["outputs"][0]["key"], "filename": "note.txt"}]
+    assert (tmp_path / result["outputs"][0]["key"]).read_text() == "hi"
 
 
 def test_settings_do_not_call_getcwd_per_read(monkeypatch: pytest.MonkeyPatch):

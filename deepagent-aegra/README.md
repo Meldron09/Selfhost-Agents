@@ -5,8 +5,8 @@ An independent deepagents multi-agent demo, self-hosted on `aegra` (mirroring
 `CONTEXT.md` for the domain vocabulary and `docs/adr/` for the decisions
 behind it.
 
-This scaffold ships a trivial graph with no subagents yet — `file-reader`,
-`output-writer`, and `web-search` are later tickets. See the parent spec:
+The orchestrator delegates every file it produces to `output-writer` ([#16](https://github.com/Meldron09/Selfhost-Agents/issues/16)).
+`file-reader` and `web-search` are later tickets. See the parent spec:
 [#13](https://github.com/Meldron09/Selfhost-Agents/issues/13).
 
 ## Commands
@@ -36,6 +36,11 @@ This scaffold ships a trivial graph with no subagents yet — `file-reader`,
   persists through its own Postgres-backed saver instead
 - `agent/scripted_model.py` — the test-only model, ported from
   `agent-runtime` (docs/adr/0005)
+- `agent/state.py` — the custom `outputs` graph-state field (docs/adr/0001)
+- `agent/output_writer.py` — the `output-writer` subagent's four write tools
+  (`write_xlsx`/`write_docx`/`write_pptx`/`write_txt`) and system prompt
+- `agent/subagents.py` — assembles the subagents the orchestrator's `task`
+  tool can delegate to
 - `agent/files/` — the upload/download HTTP app (`/files`), mounted
   alongside the Agent Protocol routes via `aegra-host/http_app_adapter.py`
   (docs/adr/0004)
