@@ -36,6 +36,9 @@ This scaffold ships a trivial graph with no subagents yet — `file-reader`,
   persists through its own Postgres-backed saver instead
 - `agent/scripted_model.py` — the test-only model, ported from
   `agent-runtime` (docs/adr/0005)
+- `agent/files/` — the upload/download HTTP app (`/files`), mounted
+  alongside the Agent Protocol routes via `aegra-host/http_app_adapter.py`
+  (docs/adr/0004)
 - `scripts/verify_stack.py` — PASS/FAIL check of the file store, the
   checkpointer, and Ollama reachability — kept out of `pytest`
 - `aegra-host/` — generic, project-agnostic `aegra serve` hosting scaffolding,

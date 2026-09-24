@@ -43,3 +43,13 @@ def test_file_store_dir_matches_the_dedicated_volumes_mount_path():
         f"FILE_STORE_DIR ({env_value!r}) must match where the "
         f"deepagent-aegra-files volume is actually mounted ({mount_path!r})"
     )
+
+
+def test_the_upload_download_app_is_wired_up_for_mounting():
+    """`entrypoint.sh` only renders `http.app` into `aegra.json` when both
+    `AEGRA_HTTP_APP_TARGET` and `AEGRA_HTTP_APP_DEPENDENCY_PATH` are set —
+    left unset, this project's `/files` app would silently never be mounted.
+    """
+    compose = _read()
+    assert "AEGRA_HTTP_APP_TARGET: agent/files/app.py:create_app" in compose
+    assert "AEGRA_HTTP_APP_DEPENDENCY_PATH: /app/project" in compose

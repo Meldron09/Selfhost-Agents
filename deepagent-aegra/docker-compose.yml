@@ -44,9 +44,11 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-aegra}:${POSTGRES_PASSWORD:-aegra}@postgres:5432/${POSTGRES_DB:-aegra}
       AEGRA_GRAPH_DEPENDENCY_PATH: /app/project
       AEGRA_GRAPH_TARGET: agent/graph.py:make_agent
-      # No AEGRA_HTTP_APP_TARGET yet — this ticket has no upload/download app
-      # to mount (a later ticket adds it; entrypoint.sh falls back to
-      # aegra.json.no-http.template with neither var set).
+      # The upload/download HTTP app (docs/adr/0004), mounted alongside the
+      # Agent Protocol routes in the same process/port via the existing,
+      # unmodified http_app_adapter.py.
+      AEGRA_HTTP_APP_DEPENDENCY_PATH: /app/project
+      AEGRA_HTTP_APP_TARGET: agent/files/app.py:create_app
       OLLAMA_BASE_URL: http://host.docker.internal:11434
       # Absolute, not the ./data default: agent/config.py resolves a relative
       # FILE_STORE_DIR against the process's cwd, which inside this

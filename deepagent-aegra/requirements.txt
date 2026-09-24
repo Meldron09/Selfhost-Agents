@@ -8,5 +8,14 @@ psycopg[binary,pool]>=3.2           # ditto
 
 python-dotenv>=1.0                  # scripts/verify_stack.py loads .env directly
 
+fastapi>=0.115               # agent/files: the upload/download HTTP app
+                              # (FastAPI, not plain Starlette — aegra's http.app
+                              # mount loader requires a FastAPI instance)
+starlette>=1.6                # agent/files: Response directly
+python-multipart>=0.0.9      # agent/files: multipart/form-data upload parsing
+
 pytest>=9.0
 blockbuster>=1.5                    # event-loop-safety guard, tests/test_server_compat.py
+httpx>=0.28                         # tests/test_files_app.py: starlette.testclient.TestClient
+aegra-cli==0.10.5                   # tests/test_aegra_host_http_mount.py only — must match
+                                     # aegra-host/requirements.txt's pin
