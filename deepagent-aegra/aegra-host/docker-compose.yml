@@ -1,0 +1,76 @@
+# Generic local stack for a project served via aegra-host: Postgres for
+# durable thread state, plus the aegra-host image itself. No Redis — this
+# scaffolding targets a single-instance deployment; see README.md.
+#
+# Run from the hosted project's own repo root:
+#   PROJECT_SRC_DIR=. AEGRA_GRAPH_TARGET=src/app/graph.py:build_graph \
+#     AEGRA_HTTP_APP_TARGET=src/app/http.py:create_app \
+#     docker compose -f aegra-host/docker-compose.yml up --build
+#
+# AEGRA_HTTP_APP_TARGET/AEGRA_HTTP_APP_DEPENDENCY_PATH are optional — leave
+# both unset for a project with nothing to mount over HTTP; entrypoint.sh
+# then renders aegra.json.no-http.template instead (see aegra-host/README.md).
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-aegra}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-aegra}      # CHANGE for anything real
+      POSTGRES_DB: ${POSTGRES_DB:-aegra}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - aegra-host-pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-aegra} -d ${POSTGRES_DB:-aegra}"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  aegra-host:
+    build:
+      context: ..
+      dockerfile: aegra-host/Dockerfile
+      args:
+        PROJECT_SRC_DIR: ${PROJECT_SRC_DIR:-.}
+        PROJECT_REQUIREMENTS: ${PROJECT_REQUIREMENTS:-requirements.txt}
+    # Loads the hosted project's own .env (one level up, its repo root) into
+    # the container — model plane, storage, search provider, everything
+    # agent/config.py reads via os.getenv. `required: false` so this stays
+    # generic for a hosted project that has no .env yet. Explicit keys below
+    # in `environment:` win over anything of the same name in that file.
+    env_file:
+      - path: ../.env
+        required: false
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-aegra}:${POSTGRES_PASSWORD:-aegra}@postgres:5432/${POSTGRES_DB:-aegra}
+      AEGRA_GRAPH_DEPENDENCY_PATH: /app/project
+      AEGRA_GRAPH_TARGET: ${AEGRA_GRAPH_TARGET}
+      AEGRA_HTTP_APP_DEPENDENCY_PATH: /app/project
+      AEGRA_HTTP_APP_TARGET: ${AEGRA_HTTP_APP_TARGET}
+      # MODEL_PROVIDER=ollama's default OLLAMA_BASE_URL (localhost:11434) means
+      # "the container itself" from in here, not the host machine running the
+      # Ollama daemon. Override unconditionally when set via .env/env_file.
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
+    extra_hosts:
+      # host.docker.internal is automatic on Docker Desktop (macOS/Windows);
+      # this makes it resolve on native Linux Docker Engine too.
+      - "host.docker.internal:host-gateway"
+    volumes:
+      # Keep the running container in sync with local edits instead of only
+      # what got baked in at `--build` time. "app" = the hosted project's own
+      # source (same tree the Dockerfile COPYs via PROJECT_SRC_DIR, same
+      # container path AEGRA_GRAPH_DEPENDENCY_PATH/AEGRA_HTTP_APP_DEPENDENCY_PATH
+      # point at). "system" = this scaffolding folder itself (adapters,
+      # entrypoint.sh, templates).
+      - ../${PROJECT_SRC_DIR:-.}:/app/project
+      - .:/app/aegra-host
+    ports:
+      - "${PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  aegra-host-pg-data:

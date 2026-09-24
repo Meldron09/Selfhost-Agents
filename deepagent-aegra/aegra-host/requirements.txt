@@ -1,0 +1,4 @@
+# Pinned, not floated — aegra is actively developed and this folder's
+# graph_adapter.py is a workaround for a specific version's loader behavior.
+# Re-verify graph_adapter.py's README section when bumping this.
+aegra-cli==0.10.5

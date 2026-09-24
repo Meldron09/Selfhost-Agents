@@ -1,0 +1,74 @@
+# deepagent-aegra's own stack: Postgres for durable thread state, plus the
+# aegra-host image serving this project's graph. No containerized Ollama —
+# a host-daemon OLLAMA_BASE_URL assumption, same as aegra-host/'s generic
+# scaffold (see aegra-host/README.md's "Model plane note").
+#
+# Adapted from aegra-host/docker-compose.yml (structurally unchanged — see
+# docs/adr/0002-dedicated-volume-for-file-store.md for the one addition:
+# a dedicated named volume for uploaded/generated files, mounted separately
+# from the bind-mounted project source tree). aegra-host/docker-compose.yml
+# itself stays a generic, unmodified copy of agent-runtime's — this file is
+# the project-specific instantiation of it.
+#
+# Run from this repo root:
+#   docker compose up --build
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-aegra}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-aegra}      # CHANGE for anything real
+      POSTGRES_DB: ${POSTGRES_DB:-aegra}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - deepagent-aegra-pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-aegra} -d ${POSTGRES_DB:-aegra}"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  aegra-host:
+    build:
+      context: .
+      dockerfile: aegra-host/Dockerfile
+      args:
+        PROJECT_SRC_DIR: .
+        PROJECT_REQUIREMENTS: requirements.txt
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-aegra}:${POSTGRES_PASSWORD:-aegra}@postgres:5432/${POSTGRES_DB:-aegra}
+      AEGRA_GRAPH_DEPENDENCY_PATH: /app/project
+      AEGRA_GRAPH_TARGET: agent/graph.py:make_agent
+      # No AEGRA_HTTP_APP_TARGET yet — this ticket has no upload/download app
+      # to mount (a later ticket adds it; entrypoint.sh falls back to
+      # aegra.json.no-http.template with neither var set).
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
+      # Absolute, not the ./data default: agent/config.py resolves a relative
+      # FILE_STORE_DIR against the process's cwd, which inside this
+      # container is /app/aegra-host (the Dockerfile's own final WORKDIR),
+      # never /app — a relative value here would silently miss the volume
+      # below entirely.
+      FILE_STORE_DIR: /app/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - .:/app/project
+      - ./aegra-host:/app/aegra-host
+      # Dedicated volume for uploaded/generated file bytes — its own mount
+      # path, never the bind-mounted source tree above. See
+      # docs/adr/0002-dedicated-volume-for-file-store.md.
+      - deepagent-aegra-files:/app/data
+    ports:
+      - "${PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  deepagent-aegra-pg-data:
+  deepagent-aegra-files:

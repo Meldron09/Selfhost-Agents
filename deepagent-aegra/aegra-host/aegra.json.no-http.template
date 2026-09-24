@@ -1,0 +1,6 @@
+{
+  "dependencies": ["${AEGRA_GRAPH_DEPENDENCY_PATH}"],
+  "graphs": {
+    "agent": "./graph_adapter.py:graph"
+  }
+}

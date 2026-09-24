@@ -1,0 +1,12 @@
+deepagents>=0.7.4
+langgraph>=1.2
+langchain>=1.3
+langchain-ollama>=1.1                # the only model plane: Ollama
+
+langgraph-checkpoint-postgres>=3.1  # durable thread state (DATABASE_URL)
+psycopg[binary,pool]>=3.2           # ditto
+
+python-dotenv>=1.0                  # scripts/verify_stack.py loads .env directly
+
+pytest>=9.0
+blockbuster>=1.5                    # event-loop-safety guard, tests/test_server_compat.py

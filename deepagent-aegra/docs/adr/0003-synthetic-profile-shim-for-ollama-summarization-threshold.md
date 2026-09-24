@@ -1,0 +1,9 @@
+# Synthetic `.profile` shim on `ChatOllama`, not a bespoke Ollama trigger, for the Summarization threshold
+
+`SummarizationMiddleware` carries over `agent-runtime`'s exact trigger logic unmodified: `("fraction", 0.8)` of `model.profile["max_input_tokens"]` when the model declares a profile, else an absolute `("tokens", 150_000)` fallback. `langchain_ollama.ChatOllama` exposes no `.profile` attribute at all, so reaching that fraction branch requires attaching one — the configured `ChatOllama` instance is wrapped with a synthetic `.profile = {"max_input_tokens": <OLLAMA_CONTEXT_WINDOW>}`, where `OLLAMA_CONTEXT_WINDOW` is a new fail-loud env var (no baked default, mirroring `OLLAMA_MODEL`'s convention from ADR-0002's sibling decision on [issue #6](https://github.com/Meldron09/Selfhost-Agents/issues/6)) rather than trusting Ollama's own real default (`num_ctx=2048`), which would badly misconfigure summarization for a large-context model.
+
+The rejected alternative was a bespoke Ollama-specific trigger that reads the context-window env var directly and bypasses `model.profile` entirely. That would have been a smaller, more honest diff (no pretending `ChatOllama` satisfies a protocol it doesn't), but it forks the trigger logic itself: any future non-Ollama model added to this project would need its own special-cased branch instead of just working because it has a real `.profile`. The shim keeps `_summarization_trigger` itself untouched and pushes all the Ollama-specific work to construction time.
+
+This is a real commitment: once tool code or tests start asserting on `model.profile`, reversing to the bespoke-trigger shape means touching both the middleware wiring and anything that came to depend on the shim's presence.
+
+Resolved while working wayfinder ticket [Decide: HITL gated tools and Summarization thresholds for the carried-over middleware](https://github.com/Meldron09/Selfhost-Agents/issues/9).
