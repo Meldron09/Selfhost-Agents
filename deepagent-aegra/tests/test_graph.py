@@ -44,12 +44,14 @@ def test_a_trivial_run_replies():
     assert result["messages"][-1].content == "hello there"
 
 
-def test_output_writer_and_file_reader_are_registered_but_web_search_is_not():
-    """This ticket's own scope: orchestrator + `output-writer` (#16) + `file-reader` (#17).
-
-    `task`/`general-purpose` are deepagents' own built-in delegation
-    capability and come for free regardless. `web-search` is a later ticket
-    (#18) and must not be registered yet.
+def test_output_writer_file_reader_and_web_search_are_all_registered():
+    """Issue #18's own acceptance criterion: all three subagents register
+    structurally at build time, always — no config-parameterized-graph-
+    factory pattern. Proven here by delegating to an unknown subagent name
+    and confirming deepagents' own "does not exist" error names all three as
+    the allowed types (tests/test_web_search_graph.py covers the per-run
+    *gating* of `web-search` specifically, which is a separate concern from
+    registration).
     """
     def responder(messages, tools):
         seen = [
@@ -63,7 +65,7 @@ def test_output_writer_and_file_reader_are_registered_but_web_search_is_not():
                 content="",
                 tool_calls=[{
                     "name": "task",
-                    "args": {"description": "search the web", "subagent_type": "web-search"},
+                    "args": {"description": "do something", "subagent_type": "not-a-real-subagent"},
                     "id": "c1",
                 }],
             )
@@ -76,7 +78,10 @@ def test_output_writer_and_file_reader_are_registered_but_web_search_is_not():
     )
     tool_outputs = [m.content for m in result["messages"] if getattr(m, "type", None) == "tool"]
     assert any(
-        "does not exist" in str(out) and "output-writer" in str(out) and "file-reader" in str(out)
+        "does not exist" in str(out)
+        and "output-writer" in str(out)
+        and "file-reader" in str(out)
+        and "web-search" in str(out)
         for out in tool_outputs
     ), tool_outputs
 

@@ -1,7 +1,5 @@
-"""The runtime: orchestrator + `output-writer` (#16) + `file-reader` (#17).
-
-`web-search` is a later ticket (#18) — registering it or writing its prompt
-section here would be domain behavior this ticket deliberately doesn't own.
+"""The runtime: orchestrator + `output-writer` (#16) + `file-reader` (#17) +
+`web-search` (#18, gated per-run by `WebSearchGateMiddleware`).
 """
 from __future__ import annotations
 
@@ -17,6 +15,7 @@ from agent.config import Settings, get_settings
 from agent.model import get_model
 from agent.state import DeepAgentAegraState
 from agent.subagents import build_subagents
+from agent.web_search_gate import WebSearchGateMiddleware
 
 SYSTEM_PROMPT = """You are the orchestrator for deepagent-aegra, a file-processing assistant. You read files people attach and produce files people ask for by delegating to specialists — you never touch file bytes yourself.
 
@@ -34,9 +33,7 @@ Any file you produce goes through `output-writer` via `task`, unconditionally: y
 
 Relay what a subagent actually reports, not a smoothed-over version. If `file-reader` reports a file it couldn't read — an unsupported type, an unknown key, or content that wouldn't parse — say so plainly, by filename, exactly as reported. If `output-writer` reports a file it couldn't handle, say so the same way. Never describe a file as read or written when the subagent reported it wasn't, and never answer a question about an attachment's content unless `file-reader` actually extracted it.
 
-The person receives a finished Output automatically once it's registered — you don't construct or state a path, link, or location for it. Confirm in prose what was produced; do not invent where to find it.
-
-Nothing else is wired up yet: no web search. If asked for it, say plainly that this deployment does not yet support it."""
+The person receives a finished Output automatically once it's registered — you don't construct or state a path, link, or location for it. Confirm in prose what was produced; do not invent where to find it."""
 
 _SUMMARIZE_AT_FRACTION = 0.8
 _SUMMARIZE_AT_TOKENS = 150_000  # used when the model declares no context window
@@ -60,12 +57,15 @@ def _summarization_trigger(model: BaseChatModel) -> tuple[str, float] | tuple[st
 
 def _build_middleware(settings: Settings, model: BaseChatModel) -> list[AgentMiddleware]:
     """The orchestrator's own middleware stack: `AttachmentAcknowledgeMiddleware`
-    (docs/adr/0006, new to this project — not carried over from
-    `agent-runtime`), plus `HumanInTheLoopMiddleware`/`SummarizationMiddleware`,
+    (docs/adr/0006) and `WebSearchGateMiddleware` (docs/adr/0007), both new to
+    this project, plus `HumanInTheLoopMiddleware`/`SummarizationMiddleware`,
     which are carried over from `agent-runtime` and trimmed to what this
     project actually needs (docs/adr/0005, point 5).
     """
-    middleware: list[AgentMiddleware] = [AttachmentAcknowledgeMiddleware()]
+    middleware: list[AgentMiddleware] = [
+        AttachmentAcknowledgeMiddleware(),
+        WebSearchGateMiddleware(),
+    ]
 
     if settings.require_approval:
         # Carried over with an empty gate set: no tool in this design is

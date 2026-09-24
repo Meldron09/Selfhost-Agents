@@ -28,3 +28,7 @@ The subagent that resolves an Attachment's Key to file content and extracts from
 
 **output-writer**:
 The subagent that produces a deliverable file during a run and registers it as an Output (writing to local disk via the upload/download HTTP app and appending `{key, filename}` to the `outputs` state field).
+
+**web-search**:
+The subagent that answers one research question from the web (Tavily search plus page fetch), used for anything beyond a single trivial fact. Always registered on the orchestrator's `task` tool, like `file-reader` and `output-writer`, but its actual availability toggles per run: `WebSearchGateMiddleware` reads `configurable.enable_web_search` and refuses the delegation before it reaches this subagent when the flag is off, rather than this subagent ever being left out of the roster itself (see ADR-0007).
+_Avoid_: describing `web-search` as "enabled"/"disabled" as a deployment property — it is a per-run toggle, set by the person on the client, not a server-side setting like `TAVILY_API_KEY`'s presence.

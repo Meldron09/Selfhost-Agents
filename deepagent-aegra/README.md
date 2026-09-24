@@ -5,9 +5,10 @@ An independent deepagents multi-agent demo, self-hosted on `aegra` (mirroring
 `CONTEXT.md` for the domain vocabulary and `docs/adr/` for the decisions
 behind it.
 
-The orchestrator delegates every file it produces to `output-writer` ([#16](https://github.com/Meldron09/Selfhost-Agents/issues/16))
-and every Attachment it's given to `file-reader` ([#17](https://github.com/Meldron09/Selfhost-Agents/issues/17)).
-`web-search` is a later ticket. See the parent spec:
+The orchestrator delegates every file it produces to `output-writer` ([#16](https://github.com/Meldron09/Selfhost-Agents/issues/16)),
+every Attachment it's given to `file-reader` ([#17](https://github.com/Meldron09/Selfhost-Agents/issues/17)),
+and research questions to `web-search` ([#18](https://github.com/Meldron09/Selfhost-Agents/issues/18))
+whenever a run's `configurable.enable_web_search` is on. See the parent spec:
 [#13](https://github.com/Meldron09/Selfhost-Agents/issues/13).
 
 ## Commands
@@ -47,8 +48,13 @@ and every Attachment it's given to `file-reader` ([#17](https://github.com/Meldr
 - `agent/attachment_ack.py` — the middleware that surfaces `attachments` to
   the orchestrator's own model calls, so it can acknowledge them by name
   (docs/adr/0006)
+- `agent/web_search.py` — the `web-search` subagent's two tools (`web_search`,
+  `fetch_url`, Tavily-only) and system prompt
+- `agent/web_search_gate.py` — `WebSearchGateMiddleware`: gates
+  `web-search`'s per-run availability on `configurable.enable_web_search`
+  (docs/adr/0007)
 - `agent/subagents.py` — assembles the subagents the orchestrator's `task`
-  tool can delegate to
+  tool can delegate to (all three always registered — see docs/adr/0007)
 - `agent/files/` — the upload/download HTTP app (`/files`), mounted
   alongside the Agent Protocol routes via `aegra-host/http_app_adapter.py`
   (docs/adr/0004)
