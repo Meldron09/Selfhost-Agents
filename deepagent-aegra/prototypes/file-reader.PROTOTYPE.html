@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>PROTOTYPE — file-reader subagent design</title>
+<style>
+  :root {
+    --accent: #7c5cff;
+    --bg: #0f1115;
+    --panel: #171a21;
+    --panel-2: #1e2229;
+    --border: #2a2e38;
+    --text: #e7e9ee;
+    --text-dim: #9aa0ac;
+    --ok: #59d499;
+    --bad: #ff6b6b;
+    --warn: #ffb84d;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 32px;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    line-height: 1.5;
+  }
+  .wrap { max-width: 980px; margin: 0 auto; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  h2 { font-size: 15px; margin: 0 0 10px; color: var(--text-dim); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
+  .badge {
+    display: inline-block; font-size: 11px; font-weight: 700; letter-spacing: 0.06em;
+    text-transform: uppercase; color: var(--bg); background: var(--warn);
+    padding: 2px 8px; border-radius: 4px; margin-bottom: 12px;
+  }
+  .intro {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    padding: 18px 20px; margin-bottom: 24px; font-size: 14px; color: var(--text-dim);
+  }
+  .intro b { color: var(--text); }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  @media (max-width: 820px) { .grid { grid-template-columns: 1fr; } }
+  .panel {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    padding: 18px 20px; margin-bottom: 20px;
+  }
+  .field { display: flex; justify-content: space-between; gap: 12px; padding: 6px 0; border-bottom: 1px dashed var(--border); font-size: 13px; }
+  .field:last-child { border-bottom: none; }
+  .field .k { color: var(--text-dim); }
+  .field .v { text-align: right; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; }
+  .status-ok { color: var(--ok); }
+  .status-bad { color: var(--bad); }
+  .status-warn { color: var(--warn); }
+  pre {
+    background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px;
+    padding: 12px 14px; font-size: 12.5px; overflow-x: auto; white-space: pre-wrap; word-break: break-word;
+    color: var(--text); margin: 8px 0 0;
+  }
+  .buttons { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+  button {
+    background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
+    border-radius: 7px; padding: 8px 12px; font-size: 13px; cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: white; font-weight: 600; }
+  button.danger { border-color: var(--bad); color: var(--bad); }
+  button.toggle-on { background: var(--warn); border-color: var(--warn); color: var(--bg); font-weight: 600; }
+  .tabs { display: flex; gap: 6px; margin-bottom: 14px; flex-wrap: wrap; }
+  .tab {
+    padding: 7px 12px; border-radius: 7px 7px 0 0; cursor: pointer; font-size: 13px;
+    border: 1px solid var(--border); border-bottom: none; background: var(--panel-2); color: var(--text-dim);
+  }
+  .tab.active { background: var(--panel); color: var(--text); border-color: var(--accent); }
+  .scenario-desc { font-size: 13px; color: var(--text-dim); margin-bottom: 10px; }
+  .steps { display: flex; flex-direction: column; gap: 6px; }
+  .step-btn { text-align: left; }
+  .step-btn.done { opacity: 0.45; }
+  .sysprompt-toggle { cursor: pointer; color: var(--accent); font-size: 13px; user-select: none; }
+  #sysprompt-body { display: none; margin-top: 10px; }
+  #sysprompt-body.open { display: block; }
+  .small { font-size: 12px; color: var(--text-dim); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <span class="badge">Prototype — throwaway</span>
+  <h1>file-reader subagent — dispatch, return shapes, failure handling</h1>
+  <div class="intro">
+    Question this demo is checking (wayfinder ticket
+    <a href="https://github.com/Meldron09/Selfhost-Agents/issues/4" style="color:var(--accent)">#4</a>,
+    map <a href="https://github.com/Meldron09/Selfhost-Agents/issues/1" style="color:var(--accent)">#1</a>):
+    when the orchestrator hands <b>file-reader</b> an Attachment (a <code>{key, filename}</code> pointer,
+    per <a href="https://github.com/Meldron09/Selfhost-Agents/issues/3" style="color:var(--accent)">ADR-0001</a>),
+    does <b>dispatch-by-extension → per-format tool → structured return → synthesized final message</b>
+    feel right, and does it fail cleanly on an <b>unsupported extension</b> or a <b>file that matches its
+    extension but won't parse</b>? Click through the scenarios below, or free-play. The pure dispatch/extraction
+    logic in the <code>&lt;script&gt;</code> block is what would lift into
+    <code>deepagent-aegra/agent/subagents/file_reader.py</code> — same shape, Python instead of JS, real
+    libraries (pypdf/openpyxl/python-docx/python-pptx) instead of mocked bytes.
+  </div>
+
+  <div class="panel">
+    <span class="sysprompt-toggle" onclick="toggleSysPrompt()">▸ candidate system prompt (mirrors <code>deep-research</code>'s style) — click to expand</span>
+    <div id="sysprompt-body"><pre id="sysprompt-text"></pre></div>
+  </div>
+
+  <div class="panel">
+    <h2>Attach a file</h2>
+    <div class="buttons">
+      <button onclick="attach('quarterly-report.pdf')">report.pdf</button>
+      <button onclick="attach('financials.xlsx')">financials.xlsx</button>
+      <button onclick="attach('kickoff-memo.docx')">memo.docx</button>
+      <button onclick="attach('board-deck.pptx')">deck.pptx</button>
+      <button onclick="attach('notes.txt')">notes.txt</button>
+      <button onclick="attach('archive.zip')" class="danger">archive.zip (unsupported)</button>
+    </div>
+    <div class="buttons">
+      <button id="corrupt-toggle" onclick="toggleCorrupt()">Simulate corrupt file: OFF</button>
+      <button class="primary" onclick="runFileReader()">Run file-reader ▶</button>
+      <button onclick="reset()">Reset</button>
+    </div>
+  </div>
+
+  <div class="grid">
+    <div class="panel">
+      <h2>State: current run</h2>
+      <div id="state-fields"></div>
+    </div>
+    <div class="panel">
+      <h2>file-reader's tool call</h2>
+      <pre id="tool-call">(no attachment yet)</pre>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>file-reader's final message (returned to the orchestrator via <code>task</code>)</h2>
+    <pre id="final-message">(nothing run yet)</pre>
+  </div>
+
+  <div class="panel">
+    <h2>Guided walkthroughs</h2>
+    <div class="tabs" id="tabs"></div>
+    <div id="scenario-body"></div>
+  </div>
+</div>
+
+<script>
+/* ============================================================
+ * PURE MODULE — this is the part that lifts into
+ * deepagent-aegra/agent/subagents/file_reader.py (Python).
+ * No DOM references below this block.
+ * ============================================================ */
+
+const EXTENSION_TOOL_MAP = {
+  pdf: "read_pdf",
+  xlsx: "read_xlsx",
+  xls: "read_xlsx",
+  docx: "read_docx",
+  pptx: "read_pptx",
+  txt: "read_txt",
+  md: "read_txt",
+};
+
+// Fake local-disk store the real upload/download HTTP app would back.
+// Attachment.key is opaque -- callers never construct/parse it, only
+// pass it back to resolve bytes. Mocked here as a key -> descriptor map.
+const MOCK_STORE = {};
+let keyCounter = 0;
+function issueKey(filename) {
+  keyCounter += 1;
+  const key = `atc_${keyCounter.toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+  MOCK_STORE[key] = { filename, corrupt: false };
+  return key;
+}
+
+function extOf(filename) {
+  const parts = filename.split(".");
+  return parts.length > 1 ? parts.pop().toLowerCase() : "";
+}
+
+// Dispatch: which tool (if any) handles this Attachment's filename.
+// Runs *before* any tool call -- an unsupported extension never reaches
+// a tool at all, so there is nothing for a tool to "fail" on.
+function dispatchTool(filename) {
+  const ext = extOf(filename);
+  return EXTENSION_TOOL_MAP[ext] || null;
+}
+
+// Simulates resolving key -> bytes via the upload/download HTTP app.
+// Real code: an HTTP GET (or local call) that raises/errors if the key
+// is unknown; here we only model "known key, corrupt flag set or not"
+// since key-not-found is an infra concern, not a file-reader design one.
+function resolveAttachmentBytes(key) {
+  const entry = MOCK_STORE[key];
+  if (!entry) throw new Error(`unknown key: ${key}`);
+  return entry;
+}
+
+// ---- per-format tools ----
+// Each tool signature: (key: str) -> str | list[dict]. All return either
+// plain text or a list of structured records -- never a single opaque
+// blob -- so the model reading the tool result doesn't have to re-parse
+// squashed prose back into a table it already had.
+
+function readPdf(key) {
+  const { filename, corrupt } = resolveAttachmentBytes(key);
+  if (corrupt) return { error: `could not parse ${filename}: PDF stream is truncated (unexpected EOF at page 2)` };
+  // returns: str -- page-labelled text, since pdf content is already linear
+  return {
+    text:
+`--- page 1 ---
+Q3 Revenue Summary. Total revenue $4.2M, up 11% QoQ.
+
+--- page 2 ---
+Regional breakdown: EMEA $1.6M, AMER $2.0M, APAC $0.6M.`
+  };
+}
+
+function readXlsx(key) {
+  const { filename, corrupt } = resolveAttachmentBytes(key);
+  if (corrupt) return { error: `could not parse ${filename}: not a valid OOXML zip container` };
+  // returns: list[{sheet_name, headers, rows}] -- one entry per sheet,
+  // so numeric data survives as a table instead of being flattened to prose
+  return {
+    sheets: [
+      { sheet_name: "Revenue", headers: ["Region", "Q2", "Q3"], rows: [["EMEA", 1450000, 1600000], ["AMER", 1820000, 2000000], ["APAC", 540000, 600000]] },
+      { sheet_name: "Headcount", headers: ["Team", "Count"], rows: [["Eng", 42], ["Sales", 18]] },
+    ]
+  };
+}
+
+function readDocx(key) {
+  const { filename, corrupt } = resolveAttachmentBytes(key);
+  if (corrupt) return { error: `could not parse ${filename}: document.xml missing from archive` };
+  // returns: str -- markdown-ish extract; headings kept as #/##, tables
+  // rendered as inline markdown tables, so structure survives the read
+  return {
+    text:
+`# Kickoff Memo
+
+## Scope
+Independent deepagents demo, self-hosted on aegra.
+
+## Owners
+| Role | Name |
+|---|---|
+| Orchestrator design | TBD |
+| file-reader design | this ticket |`
+  };
+}
+
+function readPptx(key) {
+  const { filename, corrupt } = resolveAttachmentBytes(key);
+  if (corrupt) return { error: `could not parse ${filename}: slide1.xml malformed` };
+  // returns: list[{slide_number, title, bullets, speaker_notes}]
+  return {
+    slides: [
+      { slide_number: 1, title: "Deepagent on Aegra", bullets: ["Independent demo", "No sandbox"], speaker_notes: "" },
+      { slide_number: 2, title: "Subagents", bullets: ["file-reader", "output-writer", "web-search"], speaker_notes: "Mirrors deep-research's structural pattern." },
+    ]
+  };
+}
+
+function readTxt(key) {
+  const { filename, corrupt } = resolveAttachmentBytes(key);
+  if (corrupt) return { error: `could not parse ${filename}: file is not valid UTF-8` };
+  // returns: str -- no transformation, it's already the leaf format
+  return { text: "Reminder: demo runs Ollama-only, no code-execution sandbox." };
+}
+
+const TOOL_FNS = { read_pdf: readPdf, read_xlsx: readXlsx, read_docx: readDocx, read_pptx: readPptx, read_txt: readTxt };
+
+// Orchestrates one Attachment through dispatch -> tool -> result.
+// This is the shape of file-reader's own reasoning per its system
+// prompt, modeled here as pure logic rather than an LLM call.
+function runOnAttachment(attachment) {
+  const tool = dispatchTool(attachment.filename);
+  if (!tool) {
+    return {
+      toolCall: null,
+      result: null,
+      finalMessage: `Could not read "${attachment.filename}": unsupported file type. Supported: pdf, xlsx, xls, docx, pptx, txt, md.`,
+    };
+  }
+  const result = TOOL_FNS[tool](attachment.key);
+  if (result.error) {
+    return {
+      toolCall: `${tool}(key="${attachment.key}")`,
+      result,
+      finalMessage: `Could not read "${attachment.filename}": ${result.error}`,
+    };
+  }
+  return {
+    toolCall: `${tool}(key="${attachment.key}")`,
+    result,
+    finalMessage: renderFinalMessage(attachment.filename, tool, result),
+  };
+}
+
+function renderFinalMessage(filename, tool, result) {
+  if (result.text) {
+    return `Read "${filename}" via ${tool}.\n\n${result.text}`;
+  }
+  if (result.sheets) {
+    const lines = result.sheets.map(s => `Sheet "${s.sheet_name}" (${s.headers.join(", ")}): ${s.rows.length} rows.`);
+    return `Read "${filename}" via ${tool}. ${result.sheets.length} sheet(s):\n` + lines.join("\n");
+  }
+  if (result.slides) {
+    const lines = result.slides.map(s => `Slide ${s.slide_number}: "${s.title}" — ${s.bullets.join("; ")}`);
+    return `Read "${filename}" via ${tool}. ${result.slides.length} slide(s):\n` + lines.join("\n");
+  }
+  return `Read "${filename}" via ${tool}.`;
+}
+
+const SYSTEM_PROMPT = `You are the file-reader subagent. You are given one or more Attachments (each a {key, filename} pointer into the local file store) and you extract their content for the orchestrator.
+
+Method:
+1. For each Attachment, choose the tool by the filename's extension: read_pdf (.pdf), read_xlsx (.xlsx, .xls), read_docx (.docx), read_pptx (.pptx), read_txt (.txt, .md).
+2. If the extension matches none of these, do not call a tool. Report it as unsupported by name.
+3. Call the matching tool with the Attachment's key. Never guess or construct a key yourself -- pass through exactly what you were given.
+4. If a tool reports it could not parse the file, report that file by name and the reason given. Do not retry, and do not fabricate content for a file you could not read.
+
+Return a synthesis, not a raw dump. Your final message must contain, for every Attachment you were given:
+- The filename and which tool (if any) handled it.
+- For a successful read: the extracted content, restructured for readability (sheet-by-sheet for spreadsheets, slide-by-slide for decks, page-labelled for PDFs) -- not a wall of undifferentiated text.
+- For an unsupported type or a failed parse: an explicit line naming the file and the reason, so the orchestrator can relay it rather than silently dropping the file.
+
+Never invent data for a file you could not read. A gap that is labelled is useful; a fabricated figure poisons the whole run.`;
+
+/* ============================================================
+ * PAGE SHELL -- everything below wires the pure module above to
+ * buttons and a render loop. None of this lifts into real code.
+ * ============================================================ */
+
+document.getElementById("sysprompt-text").textContent = SYSTEM_PROMPT;
+function toggleSysPrompt() {
+  document.getElementById("sysprompt-body").classList.toggle("open");
+}
+
+let state = { attachment: null, corrupt: false, lastRun: null };
+
+function attach(filename) {
+  const key = issueKey(filename);
+  MOCK_STORE[key].corrupt = state.corrupt;
+  state.attachment = { key, filename };
+  state.lastRun = null;
+  render();
+}
+
+function toggleCorrupt() {
+  state.corrupt = !state.corrupt;
+  if (state.attachment) MOCK_STORE[state.attachment.key].corrupt = state.corrupt;
+  render();
+}
+
+function runFileReader() {
+  if (!state.attachment) return;
+  state.lastRun = runOnAttachment(state.attachment);
+  render();
+}
+
+function reset() {
+  state = { attachment: null, corrupt: false, lastRun: null };
+  render();
+}
+
+function statusClass() {
+  if (!state.lastRun) return "";
+  if (!state.lastRun.toolCall) return "status-warn";
+  if (state.lastRun.result && state.lastRun.result.error) return "status-bad";
+  return "status-ok";
+}
+
+function render() {
+  const fields = document.getElementById("state-fields");
+  const ext = state.attachment ? extOf(state.attachment.filename) : "—";
+  const tool = state.attachment ? (dispatchTool(state.attachment.filename) || "none (unsupported)") : "—";
+  fields.innerHTML = `
+    <div class="field"><span class="k">filename</span><span class="v">${state.attachment ? state.attachment.filename : "—"}</span></div>
+    <div class="field"><span class="k">key (opaque)</span><span class="v">${state.attachment ? state.attachment.key : "—"}</span></div>
+    <div class="field"><span class="k">extension</span><span class="v">${ext}</span></div>
+    <div class="field"><span class="k">dispatched tool</span><span class="v">${tool}</span></div>
+    <div class="field"><span class="k">corrupt flag</span><span class="v ${state.corrupt ? "status-warn" : ""}">${state.corrupt ? "ON" : "off"}</span></div>
+    <div class="field"><span class="k">run status</span><span class="v ${statusClass()}">${state.lastRun ? (!state.lastRun.toolCall ? "unsupported" : (state.lastRun.result.error ? "parse failed" : "ok")) : "not run"}</span></div>
+  `;
+  document.getElementById("corrupt-toggle").textContent = `Simulate corrupt file: ${state.corrupt ? "ON" : "OFF"}`;
+  document.getElementById("corrupt-toggle").className = state.corrupt ? "toggle-on" : "";
+  document.getElementById("tool-call").textContent = state.lastRun ? (state.lastRun.toolCall || "(no tool call — unsupported extension, short-circuited before dispatch)") : (state.attachment ? "(click Run file-reader)" : "(no attachment yet)");
+  document.getElementById("final-message").textContent = state.lastRun ? state.lastRun.finalMessage : "(nothing run yet)";
+}
+
+// ---- guided walkthroughs ----
+const SCENARIOS = [
+  {
+    name: "Happy path",
+    desc: "A single, well-formed PDF. Watch the page-labelled text extract and the plain final message.",
+    steps: [
+      { label: "Attach report.pdf", fn: () => attach("quarterly-report.pdf") },
+      { label: "Run file-reader ▶", fn: () => runFileReader() },
+    ],
+  },
+  {
+    name: "Structured edge case",
+    desc: "A multi-sheet spreadsheet. The return shape is a sheet-by-sheet table dump, not one blob of prose — watch the tool result and the final message both stay structured.",
+    steps: [
+      { label: "Attach financials.xlsx", fn: () => attach("financials.xlsx") },
+      { label: "Run file-reader ▶", fn: () => runFileReader() },
+    ],
+  },
+  {
+    name: "Illegal: unsupported extension",
+    desc: "A .zip has no matching tool. Watch that file-reader short-circuits before any tool call — the failure is dispatch-time, not a tool error.",
+    steps: [
+      { label: "Attach archive.zip", fn: () => attach("archive.zip") },
+      { label: "Run file-reader ▶", fn: () => runFileReader() },
+    ],
+  },
+  {
+    name: "Illegal: parse failure",
+    desc: "The extension matches (.pdf) but the bytes don't parse. Watch the tool itself report the failure by name and reason, with no fabricated content.",
+    steps: [
+      { label: "Attach report.pdf", fn: () => attach("quarterly-report.pdf") },
+      { label: "Simulate corrupt file: OFF → ON", fn: () => { if (!state.corrupt) toggleCorrupt(); } },
+      { label: "Run file-reader ▶", fn: () => runFileReader() },
+    ],
+  },
+];
+
+let activeScenario = 0;
+let scenarioStep = 0;
+
+function renderTabs() {
+  const tabs = document.getElementById("tabs");
+  tabs.innerHTML = SCENARIOS.map((s, i) =>
+    `<div class="tab ${i === activeScenario ? "active" : ""}" onclick="selectScenario(${i})">${s.name}</div>`
+  ).join("");
+}
+
+function selectScenario(i) {
+  activeScenario = i;
+  scenarioStep = 0;
+  reset();
+  renderScenario();
+  renderTabs();
+}
+
+function renderScenario() {
+  const s = SCENARIOS[activeScenario];
+  const body = document.getElementById("scenario-body");
+  body.innerHTML = `
+    <div class="scenario-desc">${s.desc}</div>
+    <div class="steps">
+      ${s.steps.map((step, i) => `<button class="step-btn ${i < scenarioStep ? "done" : ""}" onclick="runScenarioStep(${i})" ${i !== scenarioStep ? "disabled" : ""}>${i + 1}. ${step.label}</button>`).join("")}
+    </div>
+    ${scenarioStep >= s.steps.length ? '<div class="small" style="margin-top:8px;">Scenario complete — inspect the state and final-message panels above.</div>' : ''}
+  `;
+}
+
+function runScenarioStep(i) {
+  const s = SCENARIOS[activeScenario];
+  if (i !== scenarioStep) return;
+  s.steps[i].fn();
+  scenarioStep += 1;
+  renderScenario();
+}
+
+renderTabs();
+renderScenario();
+render();
+</script>
+</body>
+</html>
