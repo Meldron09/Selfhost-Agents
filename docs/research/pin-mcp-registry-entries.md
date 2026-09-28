@@ -3,6 +3,11 @@
 Research for issue #22 (child of the MCP support map, issue #19), resolving ADR-0009
 (`deepagent-aegra/docs/adr/0009-mcp-config-sourced-from-pinned-registry-entries.md`).
 
+**⚠️ Superseded 2026-09-28 — see "Amendment" section at the end.** Sections 2 and 3 below
+(SharePoint, Microsoft Teams) record the *original* research and its pins, which the amendment
+replaces with a single unified "Microsoft 365" connection. Kept here for the reasoning trail;
+don't use the SharePoint/Teams pins below as the final answer.
+
 All data pulled live from `https://registry.modelcontextprotocol.io/v0/servers?search=<term>`
 on 2026-09-28. Full JSON responses are quoted verbatim below (trimmed to the relevant fields);
 nothing here is invented.
@@ -201,3 +206,64 @@ flows don't have one).
 | GitHub | `io.github.github/github-mcp-server` | `1.12.2` | stdio (oci) + remote (streamable-http) | `GITHUB_PERSONAL_ACCESS_TOKEN` env var / `Authorization` header, both `isSecret: true`, not marked required on latest (was required on 0.16.0) | Clean fit |
 | SharePoint | `io.github.mindstone/mcp-server-microsoft-sharepoint` | `0.2.1` | stdio (npm) | `MS_CLIENT_ID` (required) + `MS_CONFIG_DIR` (required, filepath to a pre-populated credential store) | Partial fit — implies an out-of-band login step, no static secret alone suffices |
 | Microsoft Teams | `com.microsoft/workiq-teamsserver` | `1.0.0` | remote (streamable-http) | `tenant_id` only (not secret); real auth handshake undeclared | Weak fit — official publisher, wrong architecture (hosted Agent 365 gateway); no self-hostable, credentialed alternative exists in the registry today |
+
+---
+
+## Amendment (2026-09-28): unify SharePoint + Teams as one "Microsoft 365" connection
+
+Directed by the user: use **[Softeria/ms-365-mcp-server](https://github.com/Softeria/ms-365-mcp-server)**
+instead of separate SharePoint and Teams pins.
+
+**Pin:** `io.github.Softeria/ms-365-mcp-server`, version **`0.156.2`** (`isLatest: true`, published
+2026-09-27T18:27:40Z — confirmed live against `registry.modelcontextprotocol.io/v0/servers?search=ms-365-mcp-server`).
+
+```json
+{
+  "name": "io.github.Softeria/ms-365-mcp-server",
+  "title": "Microsoft 365 MCP Server",
+  "version": "0.156.2",
+  "packages": [
+    { "registryType": "npm", "identifier": "@softeria/ms-365-mcp-server", "transport": { "type": "stdio" } }
+  ]
+}
+```
+
+The registry package entry itself declares no `environmentVariables` (bare npm id + stdio transport
+only) — the real credential/config shape lives in the project's README, not registry metadata:
+
+| Env var | Required | Secret | Notes |
+|---|---|---|---|
+| `MS365_MCP_CLIENT_ID` | no | no | Optional — defaults to a built-in Softeria Azure AD app registration |
+| `MS365_MCP_TENANT_ID` | no | no | Default `common`; personal Microsoft accounts must use `consumers` (refresh against `common` broke for personal accounts as of June 2026) |
+| `MS365_MCP_CLIENT_SECRET` | no | yes | Only needed for a confidential-client (your own) app registration |
+| `MS365_MCP_OAUTH_TOKEN` | no | yes | BYOT mode — supply a pre-obtained token instead of doing the login flow in-process |
+| `MS365_MCP_ALLOWED_SCOPES` / `MS365_MCP_EXTRA_SCOPES` | no | no | Narrow/extend the Graph scopes requested at login |
+
+**Why this replaces both prior pins:**
+- **One connection, one login** — `--org-mode` unlocks SharePoint sites/lists/drives *and* Teams
+  chats/channels under the same MSAL session and token cache. No separate credential shape per
+  service (resolves the SharePoint `MS_CONFIG_DIR` gap: this project's device-code login populates
+  its own token cache internally, nothing pre-populated by hand).
+- **No app-only mode exists in this project at all** — auth is delegated OAuth exclusively (device
+  code by default via `--login`; browser/HTTP-OAuth mode; or BYOT). This removes the
+  split-decision problem entirely: Teams' Graph permissions were already forced into delegated-only
+  (Microsoft gates app-only chat/message access hard), and now SharePoint just uses the same
+  delegated login rather than needing its own separate story.
+- **Self-hostable and actively maintained**: 998★, MIT, near-daily releases (latest yesterday),
+  local process (`npx`/npm install) or `ghcr.io/softeria/ms-365-mcp-server` Docker image — not a
+  hosted gateway like the `com.microsoft/workiq-*` Agent 365 entries, which remain non-self-hostable
+  dead ends (confirmed unchanged).
+- The one alternative candidate found (`ai.smithery/DynamicEndpoints-m365-core-mcp`) has a genuinely
+  404'd source repo as of this research — not verifiably alive, so not considered.
+
+**Scope decision:** `--org-mode` also unlocks mail/calendar/presence/shared-mailboxes/user-management
+tools beyond SharePoint+Teams. Per the map, this connection is filtered down via
+`--enabled-tools 'sharepoint|site|drive|teams|chat'` (or equivalent) rather than exposing the full
+org-mode surface — narrower blast radius than what was asked for, widen later if wanted.
+
+**Net result — curated list is now two MCPs, not three:**
+
+| Server | Registry name | Version | Auth Mode | Credential shape |
+|---|---|---|---|---|
+| GitHub | `io.github.github/github-mcp-server` | `1.12.2` | Credential Form | `GITHUB_PERSONAL_ACCESS_TOKEN` |
+| Microsoft 365 (SharePoint + Teams) | `io.github.Softeria/ms-365-mcp-server` | `0.156.2` | Device Code | `MS365_MCP_TENANT_ID` (+ optional client ID/secret) |
