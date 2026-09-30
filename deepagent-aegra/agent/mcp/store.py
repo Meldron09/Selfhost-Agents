@@ -5,8 +5,10 @@ One whole-file Fernet-encrypted JSON document, `connections.enc`, in
 
     {"version": 1, "connections": {"github": {
         "credentials": {<Registry Entry field name>: value},
-        "enabled": bool, "login": str, "scopes": [str],
+        "enabled": bool, "login": str?, "scopes": [str]?,
         "toolCount": int, "lastError": str | None}}}
+
+`login` and `scopes` are optional, server-specific identity details.
 
 The key comes from `MCP_STORE_KEY`, read lazily on every touch — never at
 import — so the stack boots for people who never use MCP. A wrong key or a
@@ -110,8 +112,8 @@ def save_connection(
     name: str,
     credentials: dict[str, str],
     *,
-    login: str,
-    scopes: list[str],
+    login: str | None = None,
+    scopes: list[str] | None = None,
     tool_count: int = 0,
     enabled: bool | None = True,
 ) -> bool:
@@ -131,11 +133,13 @@ def save_connection(
         connections[name] = {
             "credentials": dict(credentials),
             "enabled": saved,
-            "login": login,
-            "scopes": list(scopes),
             "toolCount": tool_count,
             "lastError": None,
         }
+        if login is not None:
+            connections[name]["login"] = login
+        if scopes is not None:
+            connections[name]["scopes"] = list(scopes)
 
     _modify(mutate)
     return saved

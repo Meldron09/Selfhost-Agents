@@ -27,9 +27,9 @@ the ambient `config` is passed into `inner.ainvoke`; the inner agent has no
 `checkpointer` of its own; its input is only `{"messages": ...}`.
 
 Each Connection connects in its own try/except: a failure is recorded as its
-`lastError` (re-probing GitHub to tell a rejected token from an unreachable
-network) and the delegation carries on with those that connected. If none
-connected, the failures are relayed as text.
+`lastError` (worded by the server's seam; GitHub re-probes its token to tell a
+rejected one from an unreachable network) and the delegation carries on with
+those that connected. If none connected, the failures are relayed as text.
 
 Async only. `RunnableLambda(async_fn).invoke` raises `TypeError`, and so do
 MCP tools, so the sync path (`agent.runner`, `agent.stream`) cannot delegate to
@@ -53,11 +53,7 @@ from langchain_core.messages import AIMessage
 from langchain_core.runnables import RunnableLambda
 
 from agent.mcp import store
-from agent.mcp.github import GitHubError, build_transport, probe_token, redact
-
-# Both default to "no timeout" in fastmcp; a hung MCP server must not hang a run.
-INIT_TIMEOUT = 30
-REQUEST_TIMEOUT = 60
+from agent.mcp.servers import SERVERS
 
 NO_CONNECTIONS = (
     "No MCP connections are enabled, so nothing was run. "
@@ -99,20 +95,20 @@ async def _record(name: str, error: str | None) -> None:
         await asyncio.to_thread(store.set_last_error, name, error)
 
 
-async def _failure_reason(credentials: dict[str, str], exc: Exception) -> str:
-    """Why a connect failed: re-run the token probe for a useful 401-vs-unreachable message."""
-    try:
-        await probe_token(credentials.get("Authorization", ""))
-    except GitHubError as probe_exc:
-        reason = str(probe_exc)
-    else:
-        reason = f"MCP connection failed: {type(exc).__name__}: {exc}"
-    return redact(reason, credentials)  # persisted as lastError and shown to the person
+async def _failure_reason(name: str, credentials: dict[str, str], exc: Exception) -> str:
+    """Why a connect failed, as explained by the server's seam (persisted as lastError)."""
+    seam = SERVERS.get(name)
+    if seam is None:
+        return f"Unknown MCP server {name!r}"
+    return await seam.failure_reason(credentials, exc)
 
 
 async def _connect(stack: AsyncExitStack, name: str, credentials: dict[str, str]) -> list:
     """Connect one Connection (closed with `stack`) and list its tools, `name_`-prefixed."""
-    client = Client(build_transport(credentials), init_timeout=INIT_TIMEOUT, timeout=REQUEST_TIMEOUT)
+    seam = SERVERS[name]
+    client = Client(
+        seam.build_transport(credentials), init_timeout=seam.init_timeout, timeout=seam.request_timeout
+    )
     # ponytail: one single-member ClientGroup per Connection, not one shared group --
     # ClientGroup connects all-or-nothing, and a bad Connection must not sink the rest.
     adapter = await stack.enter_async_context(MCPAdapter(ClientGroup({name: client})))
@@ -138,7 +134,7 @@ def build_mcp_subagent(model: BaseChatModel) -> CompiledSubAgent:
                 try:
                     tools += await _connect(stack, name, conn["credentials"])
                 except Exception as exc:  # noqa: BLE001 - any connect failure is per-Connection
-                    failures[name] = await _failure_reason(conn["credentials"], exc)
+                    failures[name] = await _failure_reason(name, conn["credentials"], exc)
                     await _record(name, failures[name])
                 else:
                     if conn.get("lastError"):

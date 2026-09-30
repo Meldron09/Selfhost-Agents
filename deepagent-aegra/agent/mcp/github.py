@@ -1,4 +1,4 @@
-"""GitHub-only helpers shared by the settings API and the `mcp` subagent.
+"""GitHub-only helpers, reached through the per-server seam (`servers.py`).
 
 Credentials are keyed by the pinned Registry Entry's field name
 (docs/adr/0009): for GitHub's remote that is the `Authorization` header. The
@@ -33,14 +33,6 @@ class GitHubUnreachable(GitHubError):
 class TokenInfo:
     login: str
     scopes: list[str]
-
-
-def redact(text: str, credentials: dict[str, str]) -> str:
-    """Mask every stored credential value (and a bare token after `Bearer `) in `text`."""
-    for value in credentials.values():
-        for secret in {value, value.split()[-1]}:
-            text = text.replace(secret, "***")
-    return text
 
 
 def _bearer(value: str) -> str:

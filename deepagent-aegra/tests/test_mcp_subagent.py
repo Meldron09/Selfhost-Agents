@@ -22,7 +22,7 @@ from langgraph.types import Command
 import fake_mcp_server
 from agent.config import Settings
 from agent.graph import build_agent
-from agent.mcp import store, subagent
+from agent.mcp import github, servers, store, subagent
 from agent.mcp.github import GitHubUnreachable, TokenRejected
 from agent.scripted_model import ScriptedChatModel
 
@@ -35,10 +35,12 @@ def _env(monkeypatch: pytest.MonkeyPatch, tmp_path):
     monkeypatch.setenv("MCP_STATE_DIR", str(tmp_path))
     monkeypatch.setenv("MCP_STORE_KEY", Fernet.generate_key().decode())
     monkeypatch.setattr(
-        subagent,
+        servers.SERVERS["github"],
         "build_transport",
         lambda creds: StreamableHttpTransport(creds["url"], headers={"Authorization": creds["Authorization"]}),
     )
+    # Tests use "other" as a second Connection slug; it behaves like GitHub.
+    monkeypatch.setitem(servers.SERVERS, "other", servers.SERVERS["github"])
     fake_mcp_server.SEEN_AUTH.clear()
     fake_mcp_server.CALLS.clear()
 
@@ -172,7 +174,7 @@ def test_one_failing_connection_still_serves_the_other_and_records_last_error(mo
     async def probe(token, **_):
         raise GitHubUnreachable("could not reach api.github.com: boom")
 
-    monkeypatch.setattr(subagent, "probe_token", probe)
+    monkeypatch.setattr(github, "probe_token", probe)
     _connect("github")
     _connect("other", url=fake_mcp_server.dead_url())
 
@@ -188,7 +190,7 @@ def test_a_rejected_token_records_the_401_reason(monkeypatch):
     async def probe(token, **_):
         raise TokenRejected("GitHub rejected the token (401)")
 
-    monkeypatch.setattr(subagent, "probe_token", probe)
+    monkeypatch.setattr(github, "probe_token", probe)
     _connect("github", url=fake_mcp_server.dead_url())
 
     reply = _Run().ask()
@@ -216,7 +218,7 @@ def test_last_error_never_stores_the_token(monkeypatch):
     async def probe(token, **_):
         raise GitHubUnreachable("upstream said: Bearer tok-github was refused")
 
-    monkeypatch.setattr(subagent, "probe_token", probe)
+    monkeypatch.setattr(github, "probe_token", probe)
     _connect("github", url=fake_mcp_server.dead_url())
 
     reply = _Run().ask()
@@ -353,3 +355,28 @@ def test_canary_read_only_hint_lives_at_the_metadata_path_the_gate_reads():
     assert listed["gh_write_thing"].metadata["mcp"]["tool"]["annotations"]["read_only_hint"] is False
     assert "annotations" not in listed["gh_mystery"].metadata["mcp"]["tool"]
     assert {n for n, t in listed.items() if subagent.read_only(t)} == {"gh_read_thing"}
+
+
+def test_timeouts_come_from_the_servers_seam(monkeypatch):
+    seen = {}
+    real_client = subagent.Client
+
+    def spy(transport, **kwargs):
+        seen.update(kwargs)
+        return real_client(transport, **kwargs)
+
+    monkeypatch.setattr(subagent, "Client", spy)
+    _connect("github")
+
+    _Run().ask()
+
+    assert seen == {"init_timeout": 30, "timeout": 60}
+
+
+def test_a_connection_for_an_unknown_server_fails_with_a_reason():
+    store.save_connection("gone", {"Authorization": "Bearer tok-gone"})
+
+    reply = _Run().ask()
+
+    assert "Unknown MCP server 'gone'" in reply
+    assert "Unknown MCP server 'gone'" in store.load()["gone"]["lastError"]

@@ -9,7 +9,9 @@ nothing: credentials pass through here.
 Only curated servers exist; today that is `github`, whose credential fields
 come from the vendored Registry Entry snapshot
 (registry/github.server.json = `io.github.github/github-mcp-server@1.12.2`),
-never from a runtime Registry call.
+never from a runtime Registry call. Per-server behaviour (transport, credential
+validation, error wording) is resolved by slug in `servers.py`; the GitHub
+details below describe that implementation.
 
 API contract
 ------------
@@ -22,10 +24,11 @@ Connection state is stored, never probed, except by `PUT …/credentials`.
     {"server": "github", "title": str, "description": str,
      "credentialFields": [{"name": str, "description": str,
                            "isRequired": bool, "isSecret": bool}],
-     "connection": null | {"enabled": bool, "login": str, "scopes": [str],
+     "connection": null | {"enabled": bool, "login"?: str, "scopes"?: [str],
                            "toolCount": int, "lastError": str | null}}
 
 `connection: null` means never connected. Secret values are never returned.
+`login` and `scopes` are server-specific and may be absent.
 
 `PUT /mcp/connections/{server}/credentials` — validate-and-save. Body: a JSON
 object `{<credentialFields name>: <non-empty string>}` (unknown keys are
@@ -41,7 +44,7 @@ ignored). Checks, in order; only if all pass are the credentials persisted:
         {"error": "Token is valid but the GitHub MCP server could not be
                    reached: …"}`
 
-  Success: `200 {"login": str, "scopes": [str], "toolCount": int,
+  Success: `200 {"login"?: str, "scopes"?: [str], "toolCount": int,
   "enabled": bool}`. The first Connect saves `enabled: true`; connecting again
   replaces the credentials, preserves `enabled` and clears `lastError`. A
   failed re-submit leaves the existing Connection untouched.
@@ -71,7 +74,7 @@ from pydantic import BaseModel, StrictBool, StrictStr, ValidationError, create_m
 from starlette.responses import Response
 
 from agent.mcp import store
-from agent.mcp.github import GitHubError, TokenRejected, build_transport, probe_token, redact
+from agent.mcp.servers import SERVERS, CredentialsRejected, redact
 
 # Both default to "no timeout" in fastmcp; a hung MCP server must not hang the request.
 MCP_TIMEOUT = 20
@@ -160,23 +163,21 @@ def _parse_credentials(server: dict[str, Any], body: Any) -> dict[str, str]:
     return credentials
 
 
-async def _validate(credentials: dict[str, str]) -> tuple[Any, int]:
-    token = credentials["Authorization"]
+async def _validate(slug: str, credentials: dict[str, str]) -> tuple[dict[str, Any], int]:
+    seam = SERVERS[slug]
     try:
-        info = await probe_token(token)
-    except TokenRejected:
-        raise ApiError(422, "GitHub rejected this token (401 Bad credentials)") from None
-    except GitHubError as exc:
-        raise ApiError(502, redact(str(exc), credentials)) from None
+        extra = await seam.validate(credentials)
+    except CredentialsRejected as exc:
+        raise ApiError(exc.status, exc.message) from None
     try:
-        async with Client(build_transport(credentials), init_timeout=MCP_TIMEOUT, timeout=MCP_TIMEOUT) as client:
+        async with Client(
+            seam.build_transport(credentials), init_timeout=MCP_TIMEOUT, timeout=MCP_TIMEOUT
+        ) as client:
             tool_count = len(await client.list_tools())
     except Exception as exc:  # noqa: BLE001 — whatever the MCP client raises is "unreachable"
         message = redact(str(exc) or type(exc).__name__, credentials)
-        raise ApiError(
-            502, f"Token is valid but the GitHub MCP server could not be reached: {message}"
-        ) from None
-    return info, tool_count
+        raise ApiError(502, f"{seam.unreachable_prefix}{message}") from None
+    return extra, tool_count
 
 
 def list_connections() -> list[dict[str, Any]]:
@@ -194,6 +195,7 @@ def list_connections() -> list[dict[str, Any]]:
                 and {
                     key: connection[key]
                     for key in ("enabled", "login", "scopes", "toolCount", "lastError")
+                    if key in connection
                 },
             }
         )
@@ -204,11 +206,9 @@ def put_credentials(server: str, body: Any = Body(None)) -> dict[str, Any]:
     curated = _server(server)
     credentials = _parse_credentials(curated, body)
     # A sync handler runs in Starlette's threadpool, so there is no running loop here.
-    info, tool_count = asyncio.run(_validate(credentials))
-    enabled = store.save_connection(
-        server, credentials, login=info.login, scopes=info.scopes, tool_count=tool_count, enabled=None
-    )
-    return {"login": info.login, "scopes": info.scopes, "toolCount": tool_count, "enabled": enabled}
+    extra, tool_count = asyncio.run(_validate(server, credentials))
+    enabled = store.save_connection(server, credentials, tool_count=tool_count, enabled=None, **extra)
+    return {**extra, "toolCount": tool_count, "enabled": enabled}
 
 
 class _EnabledBody(BaseModel):

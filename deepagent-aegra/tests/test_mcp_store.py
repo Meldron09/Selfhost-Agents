@@ -163,3 +163,10 @@ def test_save_connection_with_enabled_none_preserves_the_existing_value():
 
 def test_save_connection_with_enabled_none_on_a_new_connection_is_enabled():
     assert store.save_connection("github", CREDS, login="octocat", scopes=[], enabled=None) is True
+
+
+def test_login_and_scopes_are_optional_and_omitted_when_absent():
+    store.save_connection("github", CREDS, tool_count=3)
+    conn = store.load()["github"]
+    assert "login" not in conn and "scopes" not in conn
+    assert conn["toolCount"] == 3

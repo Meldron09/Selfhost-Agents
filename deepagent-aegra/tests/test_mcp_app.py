@@ -18,7 +18,7 @@ from starlette.testclient import TestClient
 
 from agent.files import create_app
 from agent.mcp import app as mcp_app
-from agent.mcp import github, store
+from agent.mcp import github, servers, store
 
 TOKEN = "ghp_supersecrettoken1234567890"
 BODY = {"Authorization": f"Bearer {TOKEN}"}
@@ -42,6 +42,7 @@ def _fake_github_server() -> FastMCP:
 @pytest.fixture
 def github_user(monkeypatch: pytest.MonkeyPatch) -> dict:
     """Programmable `GET /user` answer; the real `probe_token` runs over it."""
+    real_probe = github.probe_token
     answer = {"status": 200, "json": {"login": "octocat"}, "headers": {"X-OAuth-Scopes": "repo, read:org"}}
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -49,9 +50,9 @@ def github_user(monkeypatch: pytest.MonkeyPatch) -> dict:
 
     async def probe(token: str):
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-            return await github.probe_token(token, client=client)
+            return await real_probe(token, client=client)
 
-    monkeypatch.setattr(mcp_app, "probe_token", probe)
+    monkeypatch.setattr(github, "probe_token", probe)
     return answer
 
 
@@ -60,7 +61,7 @@ def client(monkeypatch: pytest.MonkeyPatch, tmp_path, github_user) -> TestClient
     monkeypatch.setenv("MCP_STATE_DIR", str(tmp_path))
     monkeypatch.setenv("MCP_STORE_KEY", Fernet.generate_key().decode())
     server = _fake_github_server()
-    monkeypatch.setattr(mcp_app, "build_transport", lambda credentials: FastMCPTransport(server))
+    monkeypatch.setattr(servers.SERVERS["github"], "build_transport", lambda credentials: FastMCPTransport(server))
     return TestClient(create_app())
 
 
@@ -108,8 +109,8 @@ def test_list_makes_no_network_calls(client, monkeypatch):
     def boom(*args, **kwargs):
         raise AssertionError("GET must read stored state only")
 
-    monkeypatch.setattr(mcp_app, "probe_token", boom)
-    monkeypatch.setattr(mcp_app, "build_transport", boom)
+    monkeypatch.setattr(github, "probe_token", boom)
+    monkeypatch.setattr(servers.SERVERS["github"], "build_transport", boom)
 
     assert client.get("/mcp/connections").status_code == 200
 
@@ -161,7 +162,7 @@ def test_github_unreachable_during_the_token_probe_is_502(client, github_user):
 
 def test_a_valid_token_but_unreachable_mcp_server_is_502_and_nothing_is_saved(client, monkeypatch):
     monkeypatch.setattr(
-        mcp_app,
+        servers.SERVERS["github"],
         "build_transport",
         lambda credentials: StreamableHttpTransport(
             "http://127.0.0.1:1/mcp/", headers={"Authorization": credentials["Authorization"]}
@@ -182,7 +183,7 @@ def test_an_mcp_error_that_quotes_the_token_is_redacted_from_the_502(client, mon
     def leaky(credentials):
         raise RuntimeError(f"handshake failed for {credentials['Authorization']}")
 
-    monkeypatch.setattr(mcp_app, "build_transport", leaky)
+    monkeypatch.setattr(servers.SERVERS["github"], "build_transport", leaky)
 
     response = _connect(client)
 
@@ -193,7 +194,7 @@ def test_an_mcp_error_that_quotes_the_token_is_redacted_from_the_502(client, mon
 
 def test_the_real_github_transport_is_used_end_to_end_up_to_the_network(client, monkeypatch):
     """Unpatched `build_transport`, pointed at a closed port: a real streamable-http connect."""
-    monkeypatch.setattr(mcp_app, "build_transport", github.build_transport)
+    monkeypatch.setattr(servers.SERVERS["github"], "build_transport", github.build_transport)
     monkeypatch.setattr(github, "GITHUB_MCP_URL", "http://127.0.0.1:1/mcp/")
 
     response = _connect(client)
@@ -359,3 +360,11 @@ def test_no_secret_appears_in_any_response_or_log_line(client, caplog, github_us
 
     assert TOKEN not in "".join(seen)
     assert TOKEN not in caplog.text
+
+
+def test_a_connection_without_login_or_scopes_is_listed_without_them(client):
+    store.save_connection("github", BODY, tool_count=2)
+
+    connection = client.get("/mcp/connections").json()[0]["connection"]
+
+    assert connection == {"enabled": True, "toolCount": 2, "lastError": None}
