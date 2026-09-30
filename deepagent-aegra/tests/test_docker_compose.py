@@ -53,3 +53,27 @@ def test_the_upload_download_app_is_wired_up_for_mounting():
     compose = _read()
     assert "AEGRA_HTTP_APP_TARGET: agent/files/app.py:create_app" in compose
     assert "AEGRA_HTTP_APP_DEPENDENCY_PATH: /app/project" in compose
+
+
+_MCP_MOUNT = re.compile(r"deepagent-aegra-mcp:(/\S+)")
+_MCP_STATE_DIR_ENV = re.compile(r"MCP_STATE_DIR:\s*(\S+)")
+
+
+def test_mcp_state_dir_is_absolute_and_matches_its_own_volume():
+    compose = _read()
+    env = _MCP_STATE_DIR_ENV.search(compose)
+    mount = _MCP_MOUNT.search(compose)
+    assert env, "docker-compose.yml must set MCP_STATE_DIR explicitly"
+    assert mount, "docker-compose.yml must mount the deepagent-aegra-mcp volume"
+    assert env.group(1).startswith("/"), "MCP_STATE_DIR must be absolute"
+    assert env.group(1) == mount.group(1) == "/app/mcp-state"
+    assert re.search(r"^volumes:\n(?:.*\n)*?\s+deepagent-aegra-mcp:\s*$", compose, re.M)
+
+
+def test_the_connection_store_is_never_under_the_served_file_store():
+    """`/files/{key}` serves anything under FILE_STORE_DIR — credentials there
+    would be downloadable (docs/adr/0008)."""
+    compose = _read()
+    files_dir = _FILE_STORE_DIR_ENV.search(compose).group(1).rstrip("/")
+    mcp_dir = _MCP_STATE_DIR_ENV.search(compose).group(1).rstrip("/")
+    assert not (mcp_dir + "/").startswith(files_dir + "/")

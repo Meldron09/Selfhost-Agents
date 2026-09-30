@@ -7,3 +7,4 @@ data/*
 !data/.gitkeep
 .langgraph_api/
 aegra-host/aegra.json
+mcp-state/

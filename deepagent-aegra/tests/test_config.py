@@ -66,3 +66,20 @@ def test_require_approval_parses_true(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("OLLAMA_CONTEXT_WINDOW", "32768")
     monkeypatch.setenv("REQUIRE_APPROVAL", "true")
     assert get_settings().require_approval is True
+
+
+def test_mcp_state_dir_defaults_and_is_absolute(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("OLLAMA_MODEL", "gpt-oss:20b")
+    monkeypatch.setenv("OLLAMA_CONTEXT_WINDOW", "32768")
+    monkeypatch.delenv("MCP_STATE_DIR", raising=False)
+    monkeypatch.delenv("MCP_STORE_KEY", raising=False)  # lazy: settings load without it
+    settings = get_settings()
+    assert settings.mcp_state_dir.is_absolute()
+    assert settings.mcp_state_dir.name == "mcp-state"
+
+
+def test_mcp_state_dir_reads_the_environment(monkeypatch: pytest.MonkeyPatch, tmp_path):
+    monkeypatch.setenv("OLLAMA_MODEL", "gpt-oss:20b")
+    monkeypatch.setenv("OLLAMA_CONTEXT_WINDOW", "32768")
+    monkeypatch.setenv("MCP_STATE_DIR", str(tmp_path))
+    assert get_settings().mcp_state_dir == tmp_path

@@ -56,6 +56,10 @@ services:
       # never /app — a relative value here would silently miss the volume
       # below entirely.
       FILE_STORE_DIR: /app/data
+      # The Connection Store (docs/adr/0008): absolute for the same reason as
+      # FILE_STORE_DIR, and on its own volume — never under /app/data, whose
+      # contents `/files/{key}` serves.
+      MCP_STATE_DIR: /app/mcp-state
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
@@ -65,6 +69,8 @@ services:
       # path, never the bind-mounted source tree above. See
       # docs/adr/0002-dedicated-volume-for-file-store.md.
       - deepagent-aegra-files:/app/data
+      # Encrypted MCP credentials, separate from the file store above.
+      - deepagent-aegra-mcp:/app/mcp-state
     ports:
       - "${PORT:-8000}:8000"
     depends_on:
@@ -74,3 +80,4 @@ services:
 volumes:
   deepagent-aegra-pg-data:
   deepagent-aegra-files:
+  deepagent-aegra-mcp:

@@ -30,6 +30,17 @@ def _abs_path(name: str, default: str) -> Path:
     return Path(os.path.normpath(path))
 
 
+def mcp_state_dir() -> Path:
+    """Where the Connection Store lives (docs/adr/0008).
+
+    Its own directory on its own volume, never under `FILE_STORE_DIR`: the
+    `/files/{key}` route serves anything resolvable under that root, so
+    credentials there would be downloadable. Standalone (not via `Settings`)
+    so the store can resolve it without needing the model-plane env vars.
+    """
+    return _abs_path("MCP_STATE_DIR", "./mcp-state")
+
+
 def _require(name: str) -> str:
     value = os.getenv(name)
     if not value or not value.strip():
@@ -80,6 +91,12 @@ class Settings:
     # round-trip check of it.
     file_store_dir: Path = field(default_factory=lambda: Path("./data"))
 
+    # --- MCP Connection Store (docs/adr/0008) ------------------------------
+    # MCP_STORE_KEY is deliberately not a field here: it is checked lazily,
+    # on the store's first read/write, so the stack boots without it for
+    # anyone who never uses MCP (see agent/mcp/store.py).
+    mcp_state_dir: Path = field(default_factory=lambda: Path("./mcp-state"))
+
     # --- human in the loop ------------------------------------------------
     # Carried over from agent-runtime with an empty gate set: no tool in this
     # design is approval-gated, so this flag is inert but present — see
@@ -106,6 +123,7 @@ class Settings:
             ollama_context_window=_require_int("OLLAMA_CONTEXT_WINDOW"),
             ollama_base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").strip(),
             file_store_dir=_abs_path("FILE_STORE_DIR", "./data"),
+            mcp_state_dir=mcp_state_dir(),
             require_approval=_env_bool("REQUIRE_APPROVAL", False),
             enable_todos=_env_bool("ENABLE_TODOS", True),
             tool_retries=_env_int("TOOL_RETRIES", 2),
