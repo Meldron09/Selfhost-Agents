@@ -1,7 +1,8 @@
 """A local streamable-HTTP MCP server for graph tests (no network, no GitHub).
 
-Tools: `read_thing` (readOnlyHint=True) and `write_thing` (False). `SEEN_AUTH`
-records each POST's Authorization header.
+Tools: `read_thing` (readOnlyHint=True), `write_thing` (False) and `mystery`
+(no annotations). `SEEN_AUTH` records each POST's Authorization header; `CALLS`
+the name of every tool that actually ran.
 """
 from __future__ import annotations
 
@@ -13,6 +14,7 @@ import uvicorn
 from fastmcp import FastMCP
 
 SEEN_AUTH: list[str | None] = []
+CALLS: list[str] = []
 
 
 def _build() -> FastMCP:
@@ -20,11 +22,18 @@ def _build() -> FastMCP:
 
     @mcp.tool(annotations={"readOnlyHint": True})
     def read_thing(name: str) -> str:
+        CALLS.append("read_thing")
         return f"thing:{name}"
 
     @mcp.tool(annotations={"readOnlyHint": False})
     def write_thing(name: str) -> str:
+        CALLS.append("write_thing")
         return f"wrote:{name}"
+
+    @mcp.tool()
+    def mystery(name: str) -> str:
+        CALLS.append("mystery")
+        return f"mystery:{name}"
 
     return mcp
 

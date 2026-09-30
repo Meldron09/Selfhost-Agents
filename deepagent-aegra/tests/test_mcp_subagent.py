@@ -1,4 +1,4 @@
-"""The `mcp` subagent's connect path, through the real `build_agent` graph.
+"""The `mcp` subagent's connect path and approval gate, through the real `build_agent` graph.
 
 Real Connection Store (tmp_path, real Fernet), a real local MCP server, a
 `ScriptedChatModel` for both the orchestrator and the inner agent — nothing
@@ -11,8 +11,13 @@ import asyncio
 
 import pytest
 from cryptography.fernet import Fernet
+from fastmcp import Client
+from fastmcp.client.group import ClientGroup
 from fastmcp.client.transports import StreamableHttpTransport
+from langchain.mcp import MCPAdapter
 from langchain_core.messages import AIMessage, HumanMessage
+from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.types import Command
 
 import fake_mcp_server
 from agent.config import Settings
@@ -35,6 +40,7 @@ def _env(monkeypatch: pytest.MonkeyPatch, tmp_path):
         lambda creds: StreamableHttpTransport(creds["url"], headers={"Authorization": creds["Authorization"]}),
     )
     fake_mcp_server.SEEN_AUTH.clear()
+    fake_mcp_server.CALLS.clear()
 
 
 def _connect(name: str, url: str = URL, **kw) -> None:
@@ -52,11 +58,16 @@ def _outer(messages, tools):
     return AIMessage(content="outer: " + str(messages[-1].content))
 
 
-def _inner(calls: list[str], seen: list):
-    """Inner agent: call each named tool once, then report the tool results."""
+def _inner(calls: list[str], seen: list, turns: list):
+    """Inner agent: call each named tool once, then report the tool results.
+
+    `turns` records how many messages each inner model call saw: a resume from
+    the inner checkpoint shows `[2, 4]`, a restart would show a second `2`.
+    """
 
     def responder(messages, tools):
         seen.append(list(tools))
+        turns.append(len(messages))
         if isinstance(messages[-1], HumanMessage):
             return AIMessage(
                 content="",
@@ -70,13 +81,31 @@ def _inner(calls: list[str], seen: list):
 class _Run:
     def __init__(self, inner_calls=("github_read_thing",)):
         self.bound: list = []
-        self.agent = build_agent(model=_Both(_outer, _inner(list(inner_calls), self.bound)), settings=_SETTINGS)
+        self.turns: list[int] = []
+        self.agent = build_agent(
+            model=_Both(_outer, _inner(list(inner_calls), self.bound, self.turns)),
+            settings=_SETTINGS,
+            checkpointer=InMemorySaver(),
+        )
+
+    def _config(self, thread: str) -> dict:
+        return {"configurable": {"thread_id": thread}}
+
+    def start(self, thread: str = "t1") -> dict:
+        return asyncio.run(self.agent.ainvoke({"messages": [HumanMessage("use github")]}, config=self._config(thread)))
+
+    def resume(self, decision: dict, thread: str = "t1") -> dict:
+        return asyncio.run(self.agent.ainvoke(Command(resume=decision), config=self._config(thread)))
 
     def ask(self, thread: str = "t1") -> str:
-        result = asyncio.run(
-            self.agent.ainvoke({"messages": [HumanMessage("use github")]}, config={"configurable": {"thread_id": thread}})
-        )
-        return str(result["messages"][-1].content)
+        return _reply(self.start(thread))
+
+    def pending(self, thread: str = "t1"):
+        return asyncio.run(self.agent.aget_state(self._config(thread))).tasks
+
+
+def _reply(result: dict) -> str:
+    return str(result["messages"][-1].content)
 
 
 def _Both(outer, inner):
@@ -194,3 +223,133 @@ def test_last_error_never_stores_the_token(monkeypatch):
 
     assert "tok-github" not in store.load()["github"]["lastError"]
     assert "tok-github" not in reply
+
+
+# --- approval gate: every tool not declared read-only waits for a human -------
+
+APPROVE = {"decisions": [{"type": "approve"}]}
+REJECT = {"decisions": [{"type": "reject", "message": "no"}]}
+
+
+def test_write_tool_waits_for_approval_then_resumes_the_inner_checkpoint():
+    _connect("github")
+    run = _Run(("github_write_thing",))
+
+    first = run.start()
+
+    assert len(first["__interrupt__"]) == 1
+    assert fake_mcp_server.CALLS == []  # nothing ran before the decision
+    payload = first["__interrupt__"][0].value  # agent-inbox schema, unwrapped
+    assert set(payload) == {"action_requests", "review_configs"}
+    [request] = payload["action_requests"]
+    assert (request["name"], request["args"]) == ("github_write_thing", {"name": "x"})
+    assert "github_write_thing" in request["description"]
+    assert payload["review_configs"] == [
+        {"action_name": "github_write_thing", "allowed_decisions": ["approve", "reject"]}
+    ]
+
+    done = run.resume(APPROVE)
+
+    assert "__interrupt__" not in done
+    assert fake_mcp_server.CALLS == ["write_thing"]
+    assert "wrote:x" in _reply(done)
+    assert run.turns == [2, 4]  # resumed from the checkpoint: one more turn, not a restart
+
+
+def test_rejected_write_runs_nothing_and_is_not_retried():
+    _connect("github")
+    run = _Run(("github_write_thing",))
+    run.start()
+
+    reply = _reply(run.resume(REJECT))
+
+    assert fake_mcp_server.CALLS == []
+    assert "User rejected the tool call" in reply
+    assert run.turns == [2, 4]  # the inner model saw the rejection once and did not call again
+
+
+def test_read_only_tool_runs_ungated():
+    _connect("github")
+    result = _Run(("github_read_thing",)).start()
+
+    assert "__interrupt__" not in result
+    assert fake_mcp_server.CALLS == ["read_thing"]
+
+
+def test_unannotated_tool_is_gated_and_holds_the_whole_batch():
+    _connect("github")
+    run = _Run(("github_read_thing", "github_mystery", "github_write_thing"))
+
+    first = run.start()
+
+    gated = [a["name"] for a in first["__interrupt__"][0].value["action_requests"]]
+    assert gated == ["github_mystery", "github_write_thing"]  # the read is not asked about
+    assert fake_mcp_server.CALLS == []  # ...but nothing runs until the decisions are in
+
+    run.resume({"decisions": [{"type": "reject", "message": "no"}, {"type": "approve"}]})
+
+    assert sorted(fake_mcp_server.CALLS) == ["read_thing", "write_thing"]
+
+
+def test_inner_prompt_says_a_rejected_call_was_not_run_and_is_not_retried():
+    prompt = subagent.SYSTEM_PROMPT
+    assert "rejected" in prompt and "not run" in prompt and "must not be retried" in prompt
+
+
+def test_disabling_the_connection_mid_approval_drops_the_pending_call():
+    _connect("github")
+    run = _Run(("github_write_thing",))
+    run.start()
+
+    store.set_enabled("github", False)
+    reply = _reply(run.resume(APPROVE))
+
+    assert fake_mcp_server.CALLS == []  # approved, but never executed
+    assert "dropped" in reply
+    assert run.turns == [2]  # the inner agent was not re-entered
+    assert run.pending() == ()  # and the thread is not stuck
+
+
+def test_removing_the_pending_calls_connection_drops_it_even_if_another_remains():
+    _connect("github")
+    _connect("other")
+    run = _Run(("github_write_thing",))
+    run.start()
+
+    store.delete("github")
+    reply = _reply(run.resume(APPROVE))
+
+    assert fake_mcp_server.CALLS == []
+    assert "github_write_thing is not a valid tool" in reply
+
+
+def test_removing_another_connection_leaves_the_pending_call_intact():
+    _connect("github")
+    _connect("other")
+    run = _Run(("github_write_thing",))
+    run.start()
+
+    store.delete("other")
+    run.resume(APPROVE)
+
+    assert fake_mcp_server.CALLS == ["write_thing"]
+
+
+def test_canary_read_only_hint_lives_at_the_metadata_path_the_gate_reads():
+    """Fails if `langchain.mcp` moves or renames the path `read_only` depends on.
+
+    The gate fails closed, so a rename would gate every tool rather than none --
+    safe, but this is the test that tells you why.
+    """
+
+    async def tools():
+        client = Client(StreamableHttpTransport(URL))
+        async with MCPAdapter(ClientGroup({"gh": client})) as adapter:
+            return {t.name: t for t in await adapter.list_tools()}
+
+    listed = asyncio.run(tools())
+
+    assert listed["gh_read_thing"].metadata["mcp"]["tool"]["annotations"]["read_only_hint"] is True
+    assert listed["gh_write_thing"].metadata["mcp"]["tool"]["annotations"]["read_only_hint"] is False
+    assert "annotations" not in listed["gh_mystery"].metadata["mcp"]["tool"]
+    assert {n for n, t in listed.items() if subagent.read_only(t)} == {"gh_read_thing"}
