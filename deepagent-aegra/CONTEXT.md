@@ -37,7 +37,7 @@ _Avoid_: "OAuth" alone for Device Code — both modes are ultimately backed by a
 ### Roles
 
 **Orchestrator**:
-The top-level deepagents agent a run addresses directly; delegates to `file-reader`, `output-writer`, and `web-search` via the `task` tool and is responsible for acknowledging received Attachments by name in its first reply (the mitigation for LangGraph's silent-drop-on-unrecognized-state-key behavior).
+The top-level deepagents agent a run addresses directly; delegates to `file-reader`, `output-writer`, `web-search`, and `mcp` via the `task` tool and is responsible for acknowledging received Attachments by name in its first reply (the mitigation for LangGraph's silent-drop-on-unrecognized-state-key behavior).
 
 **file-reader**:
 The subagent that resolves an Attachment's Key to file content and extracts from it, dispatching to a per-format tool (pdf/xlsx/txt/pptx/docx) chosen by the Attachment's filename extension.
@@ -50,5 +50,5 @@ The subagent that answers one research question from the web (Tavily search plus
 _Avoid_: describing `web-search` as "enabled"/"disabled" as a deployment property — it is a per-run toggle, set by the person on the client, not a server-side setting like `TAVILY_API_KEY`'s presence.
 
 **mcp**:
-The subagent that exposes every currently-enabled Connection's tools to the orchestrator. Unlike `file-reader`/`output-writer`/`web-search` (fixed, structurally-registered tool sets), `mcp` builds one `fastmcp.ClientGroup` fresh at the start of each run — scoped to whichever Connections are enabled at that moment — and tears it down at the run's end.
+The subagent that exposes every currently-enabled Connection's tools to the orchestrator. Unlike `file-reader`/`output-writer`/`web-search` (fixed, structurally-registered tool sets), `mcp` builds one `fastmcp.ClientGroup` fresh at the start of each delegation — scoped to whichever Connections are enabled at that moment — and tears it down when that delegation ends. Its enabled set is read from the Connection Store, not from per-run `configurable`, so a change in Settings takes effect on the next delegation. Any tool not declared read-only by its server requires human approval before it runs (see ADR-0008).
 _Avoid_: a per-server subagent (no separate `github`/`sharepoint`/`teams` subagents) — one subagent aggregates all enabled Connections, per `ClientGroup`'s own design.
