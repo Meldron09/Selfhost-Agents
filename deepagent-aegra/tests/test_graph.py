@@ -234,3 +234,16 @@ def test_a_scripted_run_still_completes_with_all_carried_over_middleware_install
         config={"configurable": {"thread_id": "t-full-stack"}},
     )
     assert result["messages"][-1].content == "hello there"
+
+
+def test_the_orchestrator_prompt_routes_connected_services_to_mcp():
+    """A live thread answered "create a workflow" via `output-writer` because the
+    prompt never mentioned `mcp` and said files go through `output-writer`
+    "unconditionally". Wording pin only — actual routing is the model's call.
+    """
+    from agent.graph import SYSTEM_PROMPT
+    from agent.mcp.subagent import DESCRIPTION
+
+    assert "`mcp`" in SYSTEM_PROMPT
+    assert "Acting on a service is not producing a file" in SYSTEM_PROMPT
+    assert "Always delegate" in DESCRIPTION

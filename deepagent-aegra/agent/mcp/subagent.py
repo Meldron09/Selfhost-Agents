@@ -61,8 +61,9 @@ NO_CONNECTIONS = (
 )
 
 DESCRIPTION = (
-    "Use the person's connected external services, e.g. code repositories and "
-    "workflow automation. Give it one self-contained request per call."
+    "Read or change anything in the person's connected external services, e.g. code "
+    "repositories and workflow automation. Always delegate such requests here — the "
+    "orchestrator has no other way to reach them. Give it one self-contained request per call."
 )
 
 SYSTEM_PROMPT = (

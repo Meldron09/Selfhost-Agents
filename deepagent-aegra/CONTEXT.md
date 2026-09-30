@@ -38,6 +38,7 @@ _Avoid_: "OAuth" alone for Device Code — both modes are ultimately backed by a
 
 **Orchestrator**:
 The top-level deepagents agent a run addresses directly; delegates to `file-reader`, `output-writer`, `web-search`, and `mcp` via the `task` tool and is responsible for acknowledging received Attachments by name in its first reply (the mitigation for LangGraph's silent-drop-on-unrecognized-state-key behavior).
+Routes by destination: a request to act on or read from a connected service goes to `mcp`; `output-writer` is only for when the person asks for a file. Acting on a service is not producing a file.
 
 **file-reader**:
 The subagent that resolves an Attachment's Key to file content and extracts from it, dispatching to a per-format tool (pdf/xlsx/txt/pptx/docx) chosen by the Attachment's filename extension.
