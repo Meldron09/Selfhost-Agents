@@ -1,6 +1,6 @@
 deepagents>=0.7.4
 langgraph>=1.2
-langchain>=1.3
+langchain[mcp]>=1.3                 # [mcp] -> fastmcp: agent/ builds the `mcp` subagent from langchain.mcp
 langchain-ollama>=1.1                # the only model plane: Ollama
 
 langgraph-checkpoint-postgres>=3.1  # durable thread state (DATABASE_URL)
