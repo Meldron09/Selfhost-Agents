@@ -71,7 +71,7 @@ from pydantic import BaseModel, StrictBool, StrictStr, ValidationError, create_m
 from starlette.responses import Response
 
 from agent.mcp import store
-from agent.mcp.github import GitHubError, TokenRejected, build_transport, probe_token
+from agent.mcp.github import GitHubError, TokenRejected, build_transport, probe_token, redact
 
 # Both default to "no timeout" in fastmcp; a hung MCP server must not hang the request.
 MCP_TIMEOUT = 20
@@ -144,13 +144,6 @@ def _credential_fields(server: dict[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
-def _redact(text: str, credentials: dict[str, str]) -> str:
-    for value in credentials.values():
-        for secret in {value, value.split()[-1]}:
-            text = text.replace(secret, "***")
-    return text
-
-
 def _parse_credentials(server: dict[str, Any], body: Any) -> dict[str, str]:
     if not isinstance(body, dict):
         raise ApiError(422, "Credentials must be a JSON object")
@@ -174,12 +167,12 @@ async def _validate(credentials: dict[str, str]) -> tuple[Any, int]:
     except TokenRejected:
         raise ApiError(422, "GitHub rejected this token (401 Bad credentials)") from None
     except GitHubError as exc:
-        raise ApiError(502, _redact(str(exc), credentials)) from None
+        raise ApiError(502, redact(str(exc), credentials)) from None
     try:
         async with Client(build_transport(credentials), init_timeout=MCP_TIMEOUT, timeout=MCP_TIMEOUT) as client:
             tool_count = len(await client.list_tools())
     except Exception as exc:  # noqa: BLE001 — whatever the MCP client raises is "unreachable"
-        message = _redact(str(exc) or type(exc).__name__, credentials)
+        message = redact(str(exc) or type(exc).__name__, credentials)
         raise ApiError(
             502, f"Token is valid but the GitHub MCP server could not be reached: {message}"
         ) from None

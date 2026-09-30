@@ -35,6 +35,14 @@ class TokenInfo:
     scopes: list[str]
 
 
+def redact(text: str, credentials: dict[str, str]) -> str:
+    """Mask every stored credential value (and a bare token after `Bearer `) in `text`."""
+    for value in credentials.values():
+        for secret in {value, value.split()[-1]}:
+            text = text.replace(secret, "***")
+    return text
+
+
 def _bearer(value: str) -> str:
     value = value.strip()
     return value if value.lower().startswith("bearer ") else f"Bearer {value}"

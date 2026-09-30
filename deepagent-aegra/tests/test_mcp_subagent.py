@@ -181,3 +181,16 @@ def test_a_missing_store_key_is_relayed_not_raised(monkeypatch):
     monkeypatch.delenv("MCP_STORE_KEY")
     reply = _Run().ask()
     assert "MCP_STORE_KEY" in reply
+
+
+def test_last_error_never_stores_the_token(monkeypatch):
+    async def probe(token, **_):
+        raise GitHubUnreachable("upstream said: Bearer tok-github was refused")
+
+    monkeypatch.setattr(subagent, "probe_token", probe)
+    _connect("github", url=fake_mcp_server.dead_url())
+
+    reply = _Run().ask()
+
+    assert "tok-github" not in store.load()["github"]["lastError"]
+    assert "tok-github" not in reply

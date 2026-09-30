@@ -7,7 +7,11 @@ are closed when the delegation ends, and a change made in Settings (or by
 `set_enabled`) takes effect on the next delegation. Tool names are namespaced
 by server slug (`github_…`).
 
-Construction rules (docs/research/mcp-hitl-spike.md): the runnable is async;
+Not yet approval-gated: write tools run unprompted until the next slice adds
+the `HumanInTheLoopMiddleware` gate (ADR-0008). The zero-enabled reply already
+words the drop of an approval-pending action for that slice.
+
+Construction rules (issue #27's HITL spike, branch `research/mcp-hitl-spike`): the runnable is async;
 the ambient `config` is passed into `inner.ainvoke`; the inner agent has no
 `checkpointer` of its own; its input is only `{"messages": ...}`.
 
@@ -37,7 +41,7 @@ from langchain_core.messages import AIMessage
 from langchain_core.runnables import RunnableLambda
 
 from agent.mcp import store
-from agent.mcp.github import GitHubError, build_transport, probe_token
+from agent.mcp.github import GitHubError, build_transport, probe_token, redact
 
 # Both default to "no timeout" in fastmcp; a hung MCP server must not hang a run.
 INIT_TIMEOUT = 30
@@ -75,8 +79,10 @@ async def _failure_reason(credentials: dict[str, str], exc: Exception) -> str:
     try:
         await probe_token(credentials.get("Authorization", ""))
     except GitHubError as probe_exc:
-        return str(probe_exc)
-    return f"MCP connection failed: {type(exc).__name__}: {exc}"
+        reason = str(probe_exc)
+    else:
+        reason = f"MCP connection failed: {type(exc).__name__}: {exc}"
+    return redact(reason, credentials)  # persisted as lastError and shown to the person
 
 
 async def _connect(stack: AsyncExitStack, name: str, credentials: dict[str, str]) -> list:

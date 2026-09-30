@@ -42,12 +42,17 @@ class _Spy:
         return await self.app(scope, receive, send)
 
 
-def start() -> str:
-    """Start the server on a free loopback port; return its /mcp URL."""
+def _free_port() -> int:
     sock = socket.socket()
     sock.bind(("127.0.0.1", 0))
     port = sock.getsockname()[1]
     sock.close()
+    return port
+
+
+def start() -> str:
+    """Start the server on a free loopback port; return its /mcp URL."""
+    port = _free_port()
     app = _Spy(_build().http_app(path="/mcp"))
     server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error"))
     threading.Thread(target=server.run, daemon=True).start()
@@ -60,8 +65,4 @@ def start() -> str:
 
 def dead_url() -> str:
     """A loopback URL with nothing listening."""
-    sock = socket.socket()
-    sock.bind(("127.0.0.1", 0))
-    port = sock.getsockname()[1]
-    sock.close()
-    return f"http://127.0.0.1:{port}/mcp"
+    return f"http://127.0.0.1:{_free_port()}/mcp"
