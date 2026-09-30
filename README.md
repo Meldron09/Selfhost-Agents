@@ -2,7 +2,7 @@
 
 A chat app backed by a team of AI agents that you run entirely on your own machine.
 
-Drop in a PDF, spreadsheet, Word doc, or slide deck and ask questions about it. Ask for a report and get a real `.xlsx`, `.docx`, `.pptx`, or `.txt` file back to download. Turn on web search when a question needs fresh information, or connect your GitHub account so the agent can look things up there. The AI model runs locally through [Ollama](https://ollama.com), so your files never have to leave your computer.
+Drop in a PDF, spreadsheet, Word doc, or slide deck and ask questions about it. Ask for a report and get a real `.xlsx`, `.docx`, `.pptx`, or `.txt` file back to download. Turn on web search when a question needs fresh information, or connect your GitHub account or n8n instance so the agent can look things up and run workflows there. The AI model runs locally through [Ollama](https://ollama.com), so your files never have to leave your computer.
 
 ## What it can do
 
@@ -11,7 +11,7 @@ Drop in a PDF, spreadsheet, Word doc, or slide deck and ask questions about it. 
 | **Read a file you attach** | A `file-reader` agent opens PDF, Excel, Word, PowerPoint, or text files and answers from their real content. |
 | **Make a file for you** | An `output-writer` agent builds an Excel, Word, PowerPoint, or text file and hands you a download link. |
 | **Research something online** | A `web-search` agent searches the web and reads pages. It's off by default, and you switch it on per message with the **Web Search** toggle. |
-| **Work with GitHub** | An `mcp` agent uses your connected GitHub account (set up once in **Settings**). Anything that could change data asks for your approval first. |
+| **Work with GitHub or n8n** | An `mcp` agent uses your connected GitHub account and n8n instance (set up once in **Settings**), so it can search repositories or run your n8n workflows. Anything that could change data asks for your approval first. |
 
 A main **orchestrator** agent reads your request and hands each part to the right specialist. There is no code-execution sandbox: the agents can only use the tools listed above.
 
@@ -22,7 +22,7 @@ A main **orchestrator** agent reads your request and hands each part to the righ
 ┌───────────────┐      ┌──────────────────────────────────────────┐
 │ agent-chat-ui │ ───► │ deepagent-aegra  (agents + file storage) │ ──► Ollama (local model)
 │ (Next.js chat)│ ◄─── │ served by aegra, state kept in Postgres  │ ──► Tavily (web search, optional)
-└───────────────┘      └──────────────────────────────────────────┘ ──► GitHub MCP (optional)
+└───────────────┘      └──────────────────────────────────────────┘ ──► GitHub / n8n MCP (optional)
 ```
 
 | Folder | What it is |
@@ -74,7 +74,7 @@ Open <http://localhost:3000> and start chatting.
 Set these in `deepagent-aegra/.env`, then restart the backend.
 
 - **Web search:** set `TAVILY_API_KEY` (get one at [tavily.com](https://tavily.com)), then flip the **Web Search** toggle in the chat box.
-- **GitHub connection:** set `MCP_STORE_KEY` to a fresh encryption key. Generate one with `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`. Then open **Settings → MCP** in the UI and paste a GitHub personal access token. Losing the key makes saved credentials unreadable.
+- **GitHub and n8n connections:** set `MCP_STORE_KEY` to a fresh encryption key. Generate one with `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`. Then open **Settings → MCP** in the UI and paste a GitHub personal access token. To connect n8n, enable instance-level MCP in n8n (**Settings → Instance-level MCP**), then in the same tab enter your instance's MCP URL and its access token. Losing the key makes saved credentials unreadable.
 
 ## Learn more
 
