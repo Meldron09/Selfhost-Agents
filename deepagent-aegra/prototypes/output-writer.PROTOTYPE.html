@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>PROTOTYPE — output-writer subagent design</title>
+<style>
+  :root {
+    --accent: #7c5cff;
+    --bg: #0f1115;
+    --panel: #171a21;
+    --panel-2: #1e2229;
+    --border: #2a2e38;
+    --text: #e7e9ee;
+    --text-dim: #9aa0ac;
+    --ok: #59d499;
+    --bad: #ff6b6b;
+    --warn: #ffb84d;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 32px;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    line-height: 1.5;
+  }
+  .wrap { max-width: 980px; margin: 0 auto; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  h2 { font-size: 15px; margin: 0 0 10px; color: var(--text-dim); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
+  .badge {
+    display: inline-block; font-size: 11px; font-weight: 700; letter-spacing: 0.06em;
+    text-transform: uppercase; color: var(--bg); background: var(--warn);
+    padding: 2px 8px; border-radius: 4px; margin-bottom: 12px;
+  }
+  .intro {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    padding: 18px 20px; margin-bottom: 24px; font-size: 14px; color: var(--text-dim);
+  }
+  .intro b { color: var(--text); }
+  .intro code { color: var(--text); }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  @media (max-width: 820px) { .grid { grid-template-columns: 1fr; } }
+  .panel {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    padding: 18px 20px; margin-bottom: 20px;
+  }
+  .field { display: flex; justify-content: space-between; gap: 12px; padding: 6px 0; border-bottom: 1px dashed var(--border); font-size: 13px; }
+  .field:last-child { border-bottom: none; }
+  .field .k { color: var(--text-dim); }
+  .field .v { text-align: right; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; }
+  .status-ok { color: var(--ok); }
+  .status-bad { color: var(--bad); }
+  .status-warn { color: var(--warn); }
+  pre {
+    background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px;
+    padding: 12px 14px; font-size: 12.5px; overflow-x: auto; white-space: pre-wrap; word-break: break-word;
+    color: var(--text); margin: 8px 0 0;
+  }
+  textarea {
+    width: 100%; min-height: 90px; background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; resize: vertical;
+  }
+  .buttons { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+  button {
+    background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
+    border-radius: 7px; padding: 8px 12px; font-size: 13px; cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: white; font-weight: 600; }
+  button.danger { border-color: var(--bad); color: var(--bad); }
+  .tabs { display: flex; gap: 6px; margin-bottom: 14px; flex-wrap: wrap; }
+  .tab {
+    padding: 7px 12px; border-radius: 7px 7px 0 0; cursor: pointer; font-size: 13px;
+    border: 1px solid var(--border); border-bottom: none; background: var(--panel-2); color: var(--text-dim);
+  }
+  .tab.active { background: var(--panel); color: var(--text); border-color: var(--accent); }
+  .scenario-desc { font-size: 13px; color: var(--text-dim); margin-bottom: 10px; }
+  .steps { display: flex; flex-direction: column; gap: 6px; }
+  .step-btn { text-align: left; }
+  .step-btn.done { opacity: 0.45; }
+  .sysprompt-toggle { cursor: pointer; color: var(--accent); font-size: 13px; user-select: none; }
+  #sysprompt-body { display: none; margin-top: 10px; }
+  #sysprompt-body.open { display: block; }
+  .small { font-size: 12px; color: var(--text-dim); }
+  .outputs-list { display: flex; flex-direction: column; gap: 6px; }
+  .output-row { font-size: 12.5px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <span class="badge">Prototype — throwaway</span>
+  <h1>output-writer subagent — tool signatures, storage convention, system prompt</h1>
+  <div class="intro">
+    Question this demo is checking (wayfinder ticket
+    <a href="https://github.com/Meldron09/Selfhost-Agents/issues/5" style="color:var(--accent)">#5</a>,
+    map <a href="https://github.com/Meldron09/Selfhost-Agents/issues/1" style="color:var(--accent)">#1</a>):
+    <b>output-writer</b> is the reverse of <b>file-reader</b> (issue
+    <a href="https://github.com/Meldron09/Selfhost-Agents/issues/4" style="color:var(--accent)">#4</a>) — structured
+    data goes <i>in</i>, a file comes <i>out</i> — and it produces an Output
+    (<code>{key, filename}</code>, per <a href="https://github.com/Meldron09/Selfhost-Agents/issues/3" style="color:var(--accent)">ADR-0001</a>)
+    instead of consuming one. The crux design question: with <code>OutputsGuardMiddleware</code> and the
+    <code>outputs/</code>-as-shown-directory convention (agent-runtime's pattern) explicitly dropped for this
+    project, does output-writer need <i>any</i> directory convention at all? This prototype's answer: <b>no</b> —
+    each write tool serializes its structured input to bytes, hands them to <code>store_output_bytes(filename, bytes)</code>
+    (the write-side mirror of file-reader's <code>resolve_attachment_bytes(key)</code>, backed by the same
+    upload/download HTTP app), gets back an opaque <code>key</code>, and returns <code>{key, filename}</code> —
+    the tool never touches a path, and there's nothing for a "shown directory" to be, since discovery is entirely
+    through the <code>outputs</code> state field. Each tool also picks its own filename extension rather than trusting
+    a caller-supplied one, so there's no extension-mismatch failure mode to design for. Click through the scenarios
+    below, or free-play. The pure module in the <code>&lt;script&gt;</code> block is what would lift into
+    <code>deepagent-aegra/agent/subagents/output_writer.py</code> — same shape, Python instead of JS, real
+    libraries (openpyxl/python-docx/python-pptx) instead of mocked bytes, and a real tool return of
+    <code>Command(update={"outputs": [...]})</code> instead of a mocked state list.
+  </div>
+
+  <div class="panel">
+    <span class="sysprompt-toggle" onclick="toggleSysPrompt()">▸ candidate system prompt (mirrors <code>deep-research</code>'s style) — click to expand</span>
+    <div id="sysprompt-body"><pre id="sysprompt-text"></pre></div>
+  </div>
+
+  <div class="panel">
+    <h2>Call a write tool</h2>
+    <div class="buttons">
+      <button onclick="loadPreset('xlsx-ok')">write_xlsx — well-formed</button>
+      <button onclick="loadPreset('docx-ok')">write_docx — well-formed</button>
+      <button onclick="loadPreset('pptx-ok')">write_pptx — well-formed</button>
+      <button onclick="loadPreset('txt-ok')">write_txt — well-formed</button>
+    </div>
+    <div class="buttons">
+      <button onclick="loadPreset('xlsx-bad')" class="danger">write_xlsx — row/header mismatch</button>
+      <button onclick="loadPreset('txt-bad')" class="danger">write_txt — empty text</button>
+    </div>
+    <div class="field"><span class="k">tool</span><span class="v" id="picked-tool">write_xlsx</span></div>
+    <div class="field"><span class="k">name (no extension — tool appends its own)</span><span class="v"><input id="name-input" value="demo-workbook" style="background:var(--panel-2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:4px 8px;font-family:ui-monospace,Menlo,monospace;font-size:12px;"></span></div>
+    <textarea id="args-input"></textarea>
+    <div class="buttons" style="margin-top:8px;">
+      <button class="primary" onclick="runOutputWriter()">Run tool ▶</button>
+      <button onclick="reset()">Reset run (keep outputs)</button>
+      <button onclick="resetAll()">Reset everything</button>
+    </div>
+  </div>
+
+  <div class="grid">
+    <div class="panel">
+      <h2>Last tool call &amp; result</h2>
+      <pre id="tool-call">(no tool run yet)</pre>
+    </div>
+    <div class="panel">
+      <h2>State: <code>outputs</code> field (accumulates across the run)</h2>
+      <div id="outputs-field" class="outputs-list"></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>output-writer's final message (returned to the orchestrator via <code>task</code>)</h2>
+    <pre id="final-message">(nothing run yet)</pre>
+  </div>
+
+  <div class="panel">
+    <h2>Guided walkthroughs</h2>
+    <div class="tabs" id="tabs"></div>
+    <div id="scenario-body"></div>
+  </div>
+</div>
+
+<script>
+/* ============================================================
+ * PURE MODULE — this is the part that lifts into
+ * deepagent-aegra/agent/subagents/output_writer.py (Python).
+ * No DOM references below this block.
+ * ============================================================ */
+
+// Fake local-disk store the real upload/download HTTP app would back.
+// Mirror of file-reader's MOCK_STORE, but write-side: bytes go IN,
+// an opaque key comes OUT. output-writer never sees or chooses a path.
+const MOCK_STORE = {};
+let keyCounter = 0;
+function storeOutputBytes(filename, bytesDescriptor) {
+  keyCounter += 1;
+  const key = `out_${keyCounter.toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+  MOCK_STORE[key] = { filename, bytesDescriptor };
+  return key;
+}
+
+// ---- per-format tools ----
+// Each tool signature: (name: str, <structured data>) -> {key, filename} | {error}.
+// `name` carries no extension -- the tool appends its own canonical one, so
+// there is no extension-mismatch failure mode to design for. Structured
+// input shapes deliberately mirror file-reader's *return* shapes, so a
+// round-trip (read_xlsx's sheets -> write_xlsx's sheets) needs no reshaping.
+
+function validateXlsx(sheets) {
+  if (!Array.isArray(sheets) || sheets.length === 0) return "sheets must be a non-empty list";
+  for (const s of sheets) {
+    if (!s.sheet_name) return "every sheet needs a sheet_name";
+    if (!Array.isArray(s.headers) || s.headers.length === 0) return `sheet "${s.sheet_name || "?"}" needs non-empty headers`;
+    for (const row of s.rows || []) {
+      if (row.length !== s.headers.length) {
+        return `sheet "${s.sheet_name}": a row has ${row.length} values but ${s.headers.length} headers`;
+      }
+    }
+  }
+  return null;
+}
+
+function writeXlsx(name, sheets) {
+  const err = validateXlsx(sheets);
+  if (err) return { error: err };
+  const filename = `${name}.xlsx`;
+  const key = storeOutputBytes(filename, `<xlsx bytes: ${sheets.length} sheet(s), ${sheets.reduce((n, s) => n + (s.rows || []).length, 0)} row(s) total>`);
+  return { key, filename };
+}
+
+function validateDocx(text) {
+  if (typeof text !== "string" || text.trim() === "") return "text must be a non-empty string";
+  return null;
+}
+
+function writeDocx(name, text) {
+  const err = validateDocx(text);
+  if (err) return { error: err };
+  const filename = `${name}.docx`;
+  const key = storeOutputBytes(filename, `<docx bytes: ${text.length} chars of markdown-ish source>`);
+  return { key, filename };
+}
+
+function validatePptx(slides) {
+  if (!Array.isArray(slides) || slides.length === 0) return "slides must be a non-empty list";
+  for (const s of slides) {
+    if (!s.title) return "every slide needs a title";
+    if (!Array.isArray(s.bullets)) return `slide "${s.title || "?"}" needs a bullets list (can be empty, not missing)`;
+  }
+  return null;
+}
+
+function writePptx(name, slides) {
+  const err = validatePptx(slides);
+  if (err) return { error: err };
+  const filename = `${name}.pptx`;
+  const key = storeOutputBytes(filename, `<pptx bytes: ${slides.length} slide(s)>`);
+  return { key, filename };
+}
+
+function validateTxt(text) {
+  if (typeof text !== "string" || text.trim() === "") return "text must be a non-empty string";
+  return null;
+}
+
+function writeTxt(name, text) {
+  const err = validateTxt(text);
+  if (err) return { error: err };
+  const filename = `${name}.txt`;
+  const key = storeOutputBytes(filename, `<txt bytes: ${text.length} chars>`);
+  return { key, filename };
+}
+
+const TOOL_FNS = { write_xlsx: writeXlsx, write_docx: writeDocx, write_pptx: writePptx, write_txt: writeTxt };
+
+// Orchestrates one write-tool call. Mirrors file-reader's runOnAttachment
+// shape, but on success this is also where the write actually happens:
+// there is no separate "commit" step, since the tool call IS the write.
+// On failure, nothing is written and nothing is added to `outputs` --
+// the no-fabrication rule from file-reader's design, mirrored here as
+// "never claim a file exists that wasn't actually stored."
+function runWriteTool(tool, name, data) {
+  const result = TOOL_FNS[tool](name, data);
+  if (result.error) {
+    return {
+      toolCall: `${tool}(name=${JSON.stringify(name)}, ...)`,
+      result,
+      output: null,
+      finalMessage: `Could not write "${name}" via ${tool}: ${result.error}`,
+    };
+  }
+  return {
+    toolCall: `${tool}(name=${JSON.stringify(name)}, ...)`,
+    result,
+    output: { key: result.key, filename: result.filename },
+    finalMessage: `Wrote "${result.filename}" via ${tool} and registered it as an Output (key ${result.key}).`,
+  };
+}
+
+const SYSTEM_PROMPT = `You are the output-writer subagent. You are given structured data and you turn it into a downloadable file for the orchestrator, registering it as an Output.
+
+Method:
+1. Choose the tool by the deliverable's format: write_xlsx (tabular data, list of sheets), write_docx (prose/markdown-ish text), write_pptx (a slide deck), write_txt (plain text).
+2. Pass the structured data straight through in the shape each tool expects -- do not flatten a table to text for write_xlsx, or split prose into fake slides for write_pptx.
+3. Give each tool a short descriptive name with no file extension; the tool appends its own extension and stores the bytes -- you never construct a path or a key yourself.
+4. If a tool reports it could not write the file (malformed input, e.g. a spreadsheet row that doesn't match its headers, or empty content), report that by name and the reason given. Do not retry with guessed fixes and do not report the file as written if it wasn't.
+
+Return a synthesis, not a raw dump. Your final message must contain, for every file you attempted:
+- The requested deliverable and which tool handled it.
+- On success: the filename actually written and confirmation it was registered as an Output, so the orchestrator can tell the person it's ready to download.
+- On failure: an explicit line naming the attempted deliverable and the reason, so the orchestrator can relay it rather than silently claiming success.
+
+Never report a file as written when the underlying write failed. A gap that is labelled is useful; a claimed deliverable that doesn't exist wastes the person's next click.`;
+
+/* ============================================================
+ * PAGE SHELL -- everything below wires the pure module above to
+ * buttons and a render loop. None of this lifts into real code.
+ * ============================================================ */
+
+document.getElementById("sysprompt-text").textContent = SYSTEM_PROMPT;
+function toggleSysPrompt() {
+  document.getElementById("sysprompt-body").classList.toggle("open");
+}
+
+const PRESETS = {
+  "xlsx-ok": {
+    tool: "write_xlsx", name: "demo-workbook",
+    args: JSON.stringify([
+      { sheet_name: "Revenue", headers: ["Region", "Q2", "Q3"], rows: [["EMEA", 1450000, 1600000], ["AMER", 1820000, 2000000]] },
+      { sheet_name: "Headcount", headers: ["Team", "Count"], rows: [["Eng", 42], ["Sales", 18]] },
+    ], null, 2),
+  },
+  "docx-ok": {
+    tool: "write_docx", name: "kickoff-memo",
+    args: JSON.stringify("# Kickoff Memo\n\n## Scope\nIndependent deepagents demo, self-hosted on aegra.\n\n## Owners\n| Role | Name |\n|---|---|\n| output-writer design | this ticket |"),
+  },
+  "pptx-ok": {
+    tool: "write_pptx", name: "board-deck",
+    args: JSON.stringify([
+      { title: "Deepagent on Aegra", bullets: ["Independent demo", "No sandbox"], speaker_notes: "" },
+      { title: "Subagents", bullets: ["file-reader", "output-writer", "web-search"], speaker_notes: "Mirrors deep-research's structural pattern." },
+    ], null, 2),
+  },
+  "txt-ok": {
+    tool: "write_txt", name: "run-notes",
+    args: JSON.stringify("Reminder: demo runs Ollama-only, no code-execution sandbox."),
+  },
+  "xlsx-bad": {
+    tool: "write_xlsx", name: "broken-workbook",
+    args: JSON.stringify([
+      { sheet_name: "Revenue", headers: ["Region", "Q2", "Q3"], rows: [["EMEA", 1450000]] },
+    ], null, 2),
+  },
+  "txt-bad": {
+    tool: "write_txt", name: "empty-notes",
+    args: JSON.stringify("   "),
+  },
+};
+
+let state = { outputs: [], lastRun: null };
+
+function loadPreset(key) {
+  const p = PRESETS[key];
+  document.getElementById("picked-tool").textContent = p.tool;
+  document.getElementById("name-input").value = p.name;
+  document.getElementById("args-input").value = p.args;
+  document.getElementById("args-input").dataset.tool = p.tool;
+  render();
+}
+
+function runOutputWriter() {
+  const tool = document.getElementById("args-input").dataset.tool || document.getElementById("picked-tool").textContent;
+  const name = document.getElementById("name-input").value.trim();
+  let data;
+  try {
+    data = JSON.parse(document.getElementById("args-input").value);
+  } catch (e) {
+    state.lastRun = { toolCall: `${tool}(name=${JSON.stringify(name)}, ...)`, result: { error: "invalid JSON in args" }, output: null, finalMessage: `Could not write "${name}" via ${tool}: invalid input.` };
+    render();
+    return;
+  }
+  state.lastRun = runWriteTool(tool, name, data);
+  if (state.lastRun.output) state.outputs.push(state.lastRun.output);
+  render();
+}
+
+function reset() {
+  state.lastRun = null;
+  render();
+}
+
+function resetAll() {
+  state = { outputs: [], lastRun: null };
+  render();
+}
+
+function statusClass() {
+  if (!state.lastRun) return "";
+  return state.lastRun.result.error ? "status-bad" : "status-ok";
+}
+
+function render() {
+  document.getElementById("tool-call").textContent = state.lastRun
+    ? `${state.lastRun.toolCall}\n\n→ ${JSON.stringify(state.lastRun.result, null, 2)}`
+    : "(no tool run yet)";
+  document.getElementById("tool-call").className = statusClass();
+
+  const outEl = document.getElementById("outputs-field");
+  outEl.innerHTML = state.outputs.length
+    ? state.outputs.map(o => `<div class="output-row">{ key: "${o.key}", filename: "${o.filename}" }</div>`).join("")
+    : `<div class="small">(empty — no Output registered yet)</div>`;
+
+  document.getElementById("final-message").textContent = state.lastRun ? state.lastRun.finalMessage : "(nothing run yet)";
+}
+
+// ---- guided walkthroughs ----
+const SCENARIOS = [
+  {
+    name: "Happy path",
+    desc: "A well-formed spreadsheet. Watch a key get issued and the outputs field grow by one entry.",
+    steps: [
+      { label: "Load preset: write_xlsx — well-formed", fn: () => loadPreset("xlsx-ok") },
+      { label: "Run tool ▶", fn: () => runOutputWriter() },
+    ],
+  },
+  {
+    name: "Multiple outputs in one run",
+    desc: "output-writer is called twice in the same run (a deck, then its speaker notes as text). Watch `outputs` accumulate both entries — this is why it's a list, not a single field.",
+    steps: [
+      { label: "Load preset: write_pptx — well-formed", fn: () => loadPreset("pptx-ok") },
+      { label: "Run tool ▶", fn: () => runOutputWriter() },
+      { label: "Load preset: write_txt — well-formed", fn: () => loadPreset("txt-ok") },
+      { label: "Run tool ▶", fn: () => runOutputWriter() },
+    ],
+  },
+  {
+    name: "Illegal: malformed structured input",
+    desc: "A spreadsheet row with fewer values than headers. Watch the tool reject it before any bytes are stored — no key issued, outputs untouched, and the final message names the exact mismatch.",
+    steps: [
+      { label: "Load preset: write_xlsx — row/header mismatch", fn: () => loadPreset("xlsx-bad") },
+      { label: "Run tool ▶", fn: () => runOutputWriter() },
+    ],
+  },
+  {
+    name: "Illegal: empty content",
+    desc: "write_txt called with only whitespace. Same shape of failure as the malformed spreadsheet — validated before storage, not after.",
+    steps: [
+      { label: "Load preset: write_txt — empty text", fn: () => loadPreset("txt-bad") },
+      { label: "Run tool ▶", fn: () => runOutputWriter() },
+    ],
+  },
+];
+
+let activeScenario = 0;
+let scenarioStep = 0;
+
+function renderTabs() {
+  const tabs = document.getElementById("tabs");
+  tabs.innerHTML = SCENARIOS.map((s, i) =>
+    `<div class="tab ${i === activeScenario ? "active" : ""}" onclick="selectScenario(${i})">${s.name}</div>`
+  ).join("");
+}
+
+function selectScenario(i) {
+  activeScenario = i;
+  scenarioStep = 0;
+  resetAll();
+  renderScenario();
+  renderTabs();
+}
+
+function renderScenario() {
+  const s = SCENARIOS[activeScenario];
+  const body = document.getElementById("scenario-body");
+  body.innerHTML = `
+    <div class="scenario-desc">${s.desc}</div>
+    <div class="steps">
+      ${s.steps.map((step, i) => `<button class="step-btn ${i < scenarioStep ? "done" : ""}" onclick="runScenarioStep(${i})" ${i !== scenarioStep ? "disabled" : ""}>${i + 1}. ${step.label}</button>`).join("")}
+    </div>
+    ${scenarioStep >= s.steps.length ? '<div class="small" style="margin-top:8px;">Scenario complete — inspect the outputs field and final-message panels above.</div>' : ''}
+  `;
+}
+
+function runScenarioStep(i) {
+  const s = SCENARIOS[activeScenario];
+  if (i !== scenarioStep) return;
+  s.steps[i].fn();
+  scenarioStep += 1;
+  renderScenario();
+}
+
+loadPreset("xlsx-ok");
+renderTabs();
+renderScenario();
+render();
+</script>
+</body>
+</html>
