@@ -1,5 +1,5 @@
 """The runtime: orchestrator + `output-writer` (#16) + `file-reader` (#17) +
-`web-search` (#18, gated per-run by `WebSearchGateMiddleware`).
+`web-search` (#18, gated per-run by `WebSearchGateMiddleware`) + `mcp` (#31).
 """
 from __future__ import annotations
 
@@ -139,7 +139,7 @@ def build_agent(
         model=model,
         system_prompt=SYSTEM_PROMPT,
         state_schema=DeepAgentAegraState,
-        subagents=build_subagents(),
+        subagents=build_subagents(model),
         middleware=_build_middleware(settings, model),
         checkpointer=checkpointer,
         name="deepagent-aegra",

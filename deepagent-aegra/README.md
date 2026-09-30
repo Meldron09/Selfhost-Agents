@@ -53,8 +53,11 @@ whenever a run's `configurable.enable_web_search` is on. See the parent spec:
 - `agent/web_search_gate.py` — `WebSearchGateMiddleware`: gates
   `web-search`'s per-run availability on `configurable.enable_web_search`
   (docs/adr/0007)
+- `agent/mcp/subagent.py` — the `mcp` subagent: per delegation, connects the
+  Connection Store's enabled Connections and runs an inner agent over their
+  tools (async only — `agent.runner`'s sync path cannot delegate to it)
 - `agent/subagents.py` — assembles the subagents the orchestrator's `task`
-  tool can delegate to (all three always registered — see docs/adr/0007)
+  tool can delegate to (all four always registered — see docs/adr/0007)
 - `agent/files/` — the upload/download HTTP app (`/files`), mounted
   alongside the Agent Protocol routes via `aegra-host/http_app_adapter.py`
   (docs/adr/0004)

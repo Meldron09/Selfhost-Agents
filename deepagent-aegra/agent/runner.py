@@ -7,6 +7,10 @@ skills, sandbox) this project's trivial graph doesn't have yet.
 
     python -m agent.runner "hello"
     python -m agent.runner --thread demo --file request.txt
+
+This path is sync (`agent.stream`), so it cannot delegate to the `mcp`
+subagent, whose runnable and tools are async-only (see `agent/mcp/subagent.py`).
+Documented rather than shimmed; `aegra serve` runs async.
 """
 from __future__ import annotations
 
