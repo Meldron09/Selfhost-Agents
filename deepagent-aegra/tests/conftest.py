@@ -25,6 +25,23 @@ def imported_modules(py_file: Path) -> set[str]:
     return modules
 
 
+def flattened_routes(routes):
+    """`app.routes` entries for a router included via `include_router` (every
+    aegra core router: health/assistants/threads/runs/store) come back as a
+    lazy `_IncludedRouter` wrapper in this FastAPI version, not a flat `Route`
+    — unwrap it via its `original_router` to see the routes it actually holds.
+    Our own `/files` routes, registered straight onto the app, already come
+    back as plain routes and pass through untouched.
+    """
+    flat = []
+    for route in routes:
+        if hasattr(route, "path"):
+            flat.append(route)
+        elif hasattr(route, "original_router"):
+            flat.extend(flattened_routes(route.original_router.routes))
+    return flat
+
+
 _MODEL_ENV = ("OLLAMA_MODEL", "OLLAMA_CONTEXT_WINDOW", "OLLAMA_BASE_URL", "DATABASE_URL")
 
 

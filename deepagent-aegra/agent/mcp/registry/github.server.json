@@ -1,0 +1,45 @@
+{
+  "name": "io.github.github/github-mcp-server",
+  "version": "1.12.2",
+  "packages": [
+    {
+      "registryType": "oci",
+      "identifier": "ghcr.io/github/github-mcp-server:1.12.2",
+      "transport": { "type": "stdio" },
+      "runtimeArguments": [
+        {
+          "name": "-p",
+          "value": "127.0.0.1:8085:8085",
+          "type": "named",
+          "description": "Publish the OAuth callback port to loopback so the in-container login callback is reachable"
+        },
+        {
+          "name": "-e",
+          "value": "GITHUB_OAUTH_CALLBACK_PORT=8085",
+          "type": "named",
+          "description": "Fixed OAuth callback port, matching the published port above"
+        },
+        {
+          "name": "-e",
+          "value": "GITHUB_PERSONAL_ACCESS_TOKEN={token}",
+          "type": "named",
+          "description": "Optional GitHub Personal Access Token. Omit to log in with OAuth on first use.",
+          "variables": { "token": { "format": "string", "isSecret": true } }
+        }
+      ]
+    }
+  ],
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://api.githubcopilot.com/mcp/",
+      "headers": [
+        {
+          "name": "Authorization",
+          "isSecret": true,
+          "description": "Authorization header with authentication token (PAT or App token)"
+        }
+      ]
+    }
+  ]
+}

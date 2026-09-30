@@ -1,6 +1,6 @@
 # Upload/download HTTP app: `/files` route contract, extension-carrying opaque keys
 
-The new upload/download HTTP app mounts at `/files`, unprefixed at the app root — mirroring `agent-runtime`'s `/artifacts` app — and exposes exactly two routes, no listing endpoint:
+The new upload/download HTTP app mounts at `/files`, unprefixed at the app root — mirroring `agent-runtime`'s `/artifacts` app — and exposes exactly two `/files` routes, no listing endpoint (the same app also carries the `/mcp/connections` settings router, since aegra allows one `http.app` — see `agent/mcp/app.py`):
 
 - `POST /files` — upload. `multipart/form-data`, one file per request. Response: bare `{"key": "..."}`, nothing echoed back (the caller already has `filename` and `size`; it just picked the file).
 - `GET /files/{key}` — download. Raw bytes; `Content-Type` guessed from the key's own extension via `mimetypes.guess_type`; `Content-Disposition: attachment; filename="<key>"`; 404 if the key doesn't resolve to a file on disk.

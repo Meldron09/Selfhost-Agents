@@ -150,3 +150,16 @@ def test_valid_ciphertext_without_a_connections_mapping_is_a_store_error(tmp_pat
     _file(tmp_path).write_bytes(Fernet(key).encrypt(doc))
     with pytest.raises(store.StoreError):
         store.load()
+
+
+def test_save_connection_with_enabled_none_preserves_the_existing_value():
+    store.save_connection("github", CREDS, login="octocat", scopes=[], enabled=False)
+
+    saved = store.save_connection("github", CREDS, login="octocat", scopes=[], enabled=None)
+
+    assert saved is False
+    assert store.load()["github"]["enabled"] is False
+
+
+def test_save_connection_with_enabled_none_on_a_new_connection_is_enabled():
+    assert store.save_connection("github", CREDS, login="octocat", scopes=[], enabled=None) is True

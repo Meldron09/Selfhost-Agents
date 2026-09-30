@@ -113,14 +113,24 @@ def save_connection(
     login: str,
     scopes: list[str],
     tool_count: int = 0,
-    enabled: bool = True,
-) -> None:
-    """Create or replace a Connection (a fresh save clears any `lastError`)."""
+    enabled: bool | None = True,
+) -> bool:
+    """Create or replace a Connection (a fresh save clears any `lastError`).
+
+    `enabled=None` keeps an existing Connection's value (True if new), decided
+    under the same lock as the write. Returns the `enabled` that was saved.
+    """
+    saved = True
 
     def mutate(connections: dict[str, dict[str, Any]]) -> None:
+        nonlocal saved
+        if enabled is None:
+            saved = connections.get(name, {}).get("enabled", True)
+        else:
+            saved = enabled
         connections[name] = {
             "credentials": dict(credentials),
-            "enabled": enabled,
+            "enabled": saved,
             "login": login,
             "scopes": list(scopes),
             "toolCount": tool_count,
@@ -128,6 +138,7 @@ def save_connection(
         }
 
     _modify(mutate)
+    return saved
 
 
 def _update(name: str, **fields: Any) -> None:

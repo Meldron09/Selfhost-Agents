@@ -18,7 +18,7 @@ from blockbuster import BlockBuster
 from starlette.testclient import TestClient
 
 from agent.files import app, create_app
-from conftest import imported_modules
+from conftest import flattened_routes, imported_modules
 
 FILES_PKG = Path(__file__).resolve().parent.parent / "agent" / "files"
 
@@ -94,7 +94,7 @@ def test_upload_accepts_any_bytes_with_no_extension_and_any_size(client: TestCli
 
 def test_there_is_no_listing_route():
     """`/files` (bare) exists only as the upload route — GET is never allowed on it."""
-    for route in app.routes:
+    for route in flattened_routes(app.routes):
         if route.path == "/files":
             assert "GET" not in route.methods
 
@@ -103,7 +103,7 @@ def test_there_is_no_listing_route():
 
 
 def test_no_route_handler_is_async():
-    for route in app.routes:
+    for route in flattened_routes(app.routes):
         assert not inspect.iscoroutinefunction(route.endpoint), route.path
 
 

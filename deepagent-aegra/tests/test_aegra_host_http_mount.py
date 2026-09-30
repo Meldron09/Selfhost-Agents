@@ -19,6 +19,7 @@ import json
 from pathlib import Path
 
 import pytest
+from conftest import flattened_routes
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 AEGRA_HOST = REPO_ROOT / "aegra-host"
@@ -45,30 +46,28 @@ def merged_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     return aegra_main.create_app()
 
 
-def _flattened_routes(routes):
-    """`app.routes` entries for a router included via `include_router` (every
-    aegra core router: health/assistants/threads/runs/store) come back as a
-    lazy `_IncludedRouter` wrapper in this FastAPI version, not a flat `Route`
-    — unwrap it via its `original_router` to see the routes it actually holds.
-    Our own `/files` routes, registered straight onto the app, already come
-    back as plain routes and pass through untouched.
-    """
-    flat = []
-    for route in routes:
-        if hasattr(route, "path"):
-            flat.append(route)
-        elif hasattr(route, "original_router"):
-            flat.extend(_flattened_routes(route.original_router.routes))
-    return flat
-
-
 def _files_routes(app):
-    return [route for route in _flattened_routes(app.routes) if route.path.startswith("/files")]
+    return [route for route in flattened_routes(app.routes) if route.path.startswith("/files")]
 
 
 def test_the_files_routes_are_present_once_mounted(merged_app):
     paths = {route.path for route in _files_routes(merged_app)}
     assert paths == {"/files", "/files/{key}"}
+
+
+def test_the_mcp_connection_routes_are_present_once_mounted(merged_app):
+    routes = {
+        (route.path, method)
+        for route in flattened_routes(merged_app.routes)
+        if route.path.startswith("/mcp")
+        for method in route.methods
+    }
+    assert routes == {
+        ("/mcp/connections", "GET"),
+        ("/mcp/connections/{server}/credentials", "PUT"),
+        ("/mcp/connections/{server}", "PATCH"),
+        ("/mcp/connections/{server}", "DELETE"),
+    }
 
 
 def test_the_mounted_files_routes_keep_their_own_methods(merged_app):
@@ -86,7 +85,7 @@ def test_the_mounted_files_routes_still_have_sync_handlers(merged_app):
 
 def test_the_agents_own_routes_are_unaffected_by_the_mount(merged_app):
     """Threads/runs (the agent's own API) still work once `/files` joins them."""
-    paths = {route.path for route in _flattened_routes(merged_app.routes)}
+    paths = {route.path for route in flattened_routes(merged_app.routes)}
     assert "/threads" in paths
     assert "/threads/{thread_id}" in paths
 
@@ -98,7 +97,7 @@ def test_files_does_not_collide_with_any_of_aegras_own_routes(merged_app):
     `/health`/`/ready`/`/live`/`/info`, `/docs`/`/redoc`/`/openapi.json`).
     """
     reserved = {"/assistants", "/threads", "/runs", "/store", "/health", "/ready", "/live", "/info"}
-    all_routes = _flattened_routes(merged_app.routes)
+    all_routes = flattened_routes(merged_app.routes)
     paths = {route.path for route in all_routes}
 
     assert paths & reserved, "sanity check: aegra's own reserved routes are actually present"
