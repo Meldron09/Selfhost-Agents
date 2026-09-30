@@ -6,12 +6,13 @@ auth — it inherits the deployment's (none). Every handler is a plain `def`
 (see agent/files/app.py for why). The router adds no middleware and logs
 nothing: credentials pass through here.
 
-Only curated servers exist; today that is `github`, whose credential fields
-come from the vendored Registry Entry snapshot
-(registry/github.server.json = `io.github.github/github-mcp-server@1.12.2`),
-never from a runtime Registry call. Per-server behaviour (transport, credential
-validation, error wording) is resolved by slug in `servers.py`; the GitHub
-details below describe that implementation.
+Only curated servers exist: `github` and `n8n`. Their credential fields come
+from vendored Registry Entries (registry/github.server.json =
+`io.github.github/github-mcp-server@1.12.2`; registry/n8n.server.json is
+hand-authored, n8n having no public listing), never from a runtime Registry
+call. Per-server behaviour (transport, credential validation, error wording)
+is resolved by slug in `servers.py`; the GitHub details below describe that
+implementation, and n8n's differences are noted at the end.
 
 API contract
 ------------
@@ -25,10 +26,13 @@ Connection state is stored, never probed, except by `PUT …/credentials`.
      "credentialFields": [{"name": str, "description": str,
                            "isRequired": bool, "isSecret": bool}],
      "connection": null | {"enabled": bool, "login"?: str, "scopes"?: [str],
+                           "values"?: {<non-secret field name>: str},
                            "toolCount": int, "lastError": str | null}}
 
 `connection: null` means never connected. Secret values are never returned.
-`login` and `scopes` are server-specific and may be absent.
+`login` and `scopes` are server-specific and may be absent. `values` carries
+the stored non-secret fields (n8n's `url`) so the form can pre-fill them; it is
+absent when a server has none (GitHub).
 
 `PUT /mcp/connections/{server}/credentials` — validate-and-save. Body: a JSON
 object `{<credentialFields name>: <non-empty string>}` (unknown keys are
@@ -55,14 +59,19 @@ anything else `422`) -> `200 {"enabled": bool}`; `404` if never connected.
 `DELETE /mcp/connections/{server}` — removes credentials and state;
 idempotent `204` whether or not a Connection existed.
 
+n8n (`PUT …/n8n/credentials`, body `{"url": str, "Authorization": str}`): a
+`url` that is not an absolute http(s) URL is `422` before any connection; there
+is no probe, so a rejected token and an unreachable host are both the `502` of
+check 3 (`"Could not connect to the n8n MCP server: …"`), redacting only the
+token. Success is `200 {"toolCount": int, "enabled": bool}`, with no
+`login`/`scopes`.
+
 A Connection Store failure (e.g. `MCP_STORE_KEY` unset, wrong key, unwritable
 volume) is `500` with the underlying message.
 """
 from __future__ import annotations
 
 import asyncio
-import json
-from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Body
@@ -74,19 +83,20 @@ from pydantic import BaseModel, StrictBool, StrictStr, ValidationError, create_m
 from starlette.responses import Response
 
 from agent.mcp import store
-from agent.mcp.servers import SERVERS, CredentialsRejected, redact
+from agent.mcp.servers import SERVERS, CredentialsRejected, credential_fields, redact, secret_values
 
 # Both default to "no timeout" in fastmcp; a hung MCP server must not hang the request.
 MCP_TIMEOUT = 20
 
-_REGISTRY = Path(__file__).with_name("registry")
-
-_CURATED: dict[str, dict[str, Any]] = {
+_CURATED: dict[str, dict[str, str]] = {
     "github": {
         "title": "GitHub",
         "description": "Search code and work with repositories, issues and pull requests.",
-        "entry": json.loads((_REGISTRY / "github.server.json").read_text()),
-    }
+    },
+    "n8n": {
+        "title": "n8n",
+        "description": "Find, create and run workflows on your n8n instance.",
+    },
 }
 
 
@@ -126,31 +136,16 @@ def _format_errors(errors: Any) -> str:
     )
 
 
-def _server(slug: str) -> dict[str, Any]:
+def _server(slug: str) -> dict[str, str]:
     if slug not in _CURATED:
         raise ApiError(404, f"Unknown MCP server {slug!r}")
     return _CURATED[slug]
 
 
-def _credential_fields(server: dict[str, Any]) -> list[dict[str, Any]]:
-    [remote] = [r for r in server["entry"]["remotes"] if r["type"] == "streamable-http"]
-    return [
-        {
-            "name": header["name"],
-            "description": header.get("description", ""),
-            # The Registry doesn't mark the token required on 1.12.2 (OAuth login is
-            # possible interactively), but a headless deployment can only use a PAT.
-            "isRequired": True,
-            "isSecret": header.get("isSecret", False),
-        }
-        for header in remote["headers"]
-    ]
-
-
-def _parse_credentials(server: dict[str, Any], body: Any) -> dict[str, str]:
+def _parse_credentials(slug: str, body: Any) -> dict[str, str]:
     if not isinstance(body, dict):
         raise ApiError(422, "Credentials must be a JSON object")
-    fields = {f["name"]: (StrictStr, ...) for f in _credential_fields(server)}
+    fields = {f["name"]: (StrictStr, ...) for f in credential_fields(slug)}
     schema = create_model("Credentials", **fields)
     try:
         parsed = schema.model_validate(body)
@@ -175,9 +170,15 @@ async def _validate(slug: str, credentials: dict[str, str]) -> tuple[dict[str, A
         ) as client:
             tool_count = len(await client.list_tools())
     except Exception as exc:  # noqa: BLE001 — whatever the MCP client raises is "unreachable"
-        message = redact(str(exc) or type(exc).__name__, credentials)
+        message = redact(str(exc) or type(exc).__name__, secret_values(slug, credentials))
         raise ApiError(502, f"{seam.unreachable_prefix}{message}") from None
     return extra, tool_count
+
+
+def _public_values(connection: dict[str, Any], public: set[str]) -> dict[str, Any]:
+    """Non-secret credential values (n8n's URL) so the form can pre-fill them."""
+    values = {k: v for k, v in connection["credentials"].items() if k in public}
+    return {"values": values} if values else {}
 
 
 def list_connections() -> list[dict[str, Any]]:
@@ -185,26 +186,28 @@ def list_connections() -> list[dict[str, Any]]:
     entries = []
     for slug, server in _CURATED.items():
         connection = stored.get(slug)
+        public = {f["name"] for f in credential_fields(slug) if not f["isSecret"]}
         entries.append(
             {
                 "server": slug,
                 "title": server["title"],
                 "description": server["description"],
-                "credentialFields": _credential_fields(server),
+                "credentialFields": credential_fields(slug),
                 "connection": connection
                 and {
                     key: connection[key]
                     for key in ("enabled", "login", "scopes", "toolCount", "lastError")
                     if key in connection
-                },
+                }
+                | _public_values(connection, public),
             }
         )
     return entries
 
 
 def put_credentials(server: str, body: Any = Body(None)) -> dict[str, Any]:
-    curated = _server(server)
-    credentials = _parse_credentials(curated, body)
+    _server(server)
+    credentials = _parse_credentials(server, body)
     # A sync handler runs in Starlette's threadpool, so there is no running loop here.
     extra, tool_count = asyncio.run(_validate(server, credentials))
     enabled = store.save_connection(server, credentials, tool_count=tool_count, enabled=None, **extra)

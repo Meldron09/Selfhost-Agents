@@ -5,7 +5,7 @@ Connection Store, connects the enabled Connections, and runs a fresh inner
 `create_agent` over their tools inside that one `async with` -- so the clients
 are closed when the delegation ends, and a change made in Settings (or by
 `set_enabled`) takes effect on the next delegation. Tool names are namespaced
-by server slug (`github_…`).
+by server slug (`github_…`, `n8n_…`).
 
 Approval gate (ADR-0008): the inner agent carries a `HumanInTheLoopMiddleware`,
 built after `list_tools`, gating every tool not declared read-only (fail-closed,
@@ -28,7 +28,7 @@ the ambient `config` is passed into `inner.ainvoke`; the inner agent has no
 
 Each Connection connects in its own try/except: a failure is recorded as its
 `lastError` (worded by the server's seam; GitHub re-probes its token to tell a
-rejected one from an unreachable network) and the delegation carries on with
+rejected one from an unreachable network, n8n can't tell them apart) and the delegation carries on with
 those that connected. If none connected, the failures are relayed as text.
 
 Async only. `RunnableLambda(async_fn).invoke` raises `TypeError`, and so do
@@ -61,8 +61,8 @@ NO_CONNECTIONS = (
 )
 
 DESCRIPTION = (
-    "Use the person's connected external services, e.g. GitHub repos, issues and PRs. "
-    "Give it one self-contained request per call."
+    "Use the person's connected external services, e.g. code repositories and "
+    "workflow automation. Give it one self-contained request per call."
 )
 
 SYSTEM_PROMPT = (

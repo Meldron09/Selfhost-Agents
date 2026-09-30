@@ -2,7 +2,7 @@
 
 Credentials are keyed by the pinned Registry Entry's field name
 (docs/adr/0009): for GitHub's remote that is the `Authorization` header. The
-person may paste a bare PAT or a full `Bearer <pat>` value; `_bearer`
+person may paste a bare PAT or a full `Bearer <pat>` value; `http.bearer`
 normalises both.
 """
 from __future__ import annotations
@@ -11,6 +11,8 @@ from dataclasses import dataclass
 
 import httpx
 from fastmcp.client.transports import StreamableHttpTransport
+
+from agent.mcp.http import bearer, build_transport as _transport
 
 GITHUB_MCP_URL = "https://api.githubcopilot.com/mcp/"
 GITHUB_USER_URL = "https://api.github.com/user"
@@ -35,18 +37,13 @@ class TokenInfo:
     scopes: list[str]
 
 
-def _bearer(value: str) -> str:
-    value = value.strip()
-    return value if value.lower().startswith("bearer ") else f"Bearer {value}"
-
-
 async def probe_token(token: str, *, client: httpx.AsyncClient | None = None) -> TokenInfo:
     """`GET /user` with the token: who it belongs to and what it can do.
 
     Scopes come from `X-OAuth-Scopes` — empty when absent (fine-grained PATs
     don't send it). Pass `client` to inject a transport in tests.
     """
-    headers = {"Authorization": _bearer(token), "Accept": "application/vnd.github+json"}
+    headers = {"Authorization": bearer(token), "Accept": "application/vnd.github+json"}
     try:
         if client is None:
             async with httpx.AsyncClient(timeout=PROBE_TIMEOUT) as owned:
@@ -74,6 +71,4 @@ async def probe_token(token: str, *, client: httpx.AsyncClient | None = None) ->
 
 def build_transport(credentials: dict[str, str]) -> StreamableHttpTransport:
     """The remote streamable-http transport for a stored GitHub Connection."""
-    return StreamableHttpTransport(
-        GITHUB_MCP_URL, headers={"Authorization": _bearer(credentials["Authorization"])}
-    )
+    return _transport(GITHUB_MCP_URL, credentials["Authorization"])

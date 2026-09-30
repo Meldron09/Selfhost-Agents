@@ -2,7 +2,8 @@
 
 Real Connection Store (tmp_path, real Fernet); GitHub's `/user` endpoint is an
 `httpx.MockTransport`; the GitHub MCP server is a local in-memory FastMCP
-server (or a closed port for the unreachable case). Nothing leaves the machine.
+server (or a closed port for the unreachable case); n8n's URL is stored, so it
+is reached directly on the local fake MCP server. Nothing leaves the machine.
 Contract: the module docstring of agent/mcp/app.py.
 """
 from __future__ import annotations
@@ -16,6 +17,7 @@ from fastmcp import FastMCP
 from fastmcp.client.transports import FastMCPTransport, StreamableHttpTransport
 from starlette.testclient import TestClient
 
+import fake_mcp_server
 from agent.files import create_app
 from agent.mcp import app as mcp_app
 from agent.mcp import github, servers, store
@@ -23,6 +25,11 @@ from agent.mcp import github, servers, store
 TOKEN = "ghp_supersecrettoken1234567890"
 BODY = {"Authorization": f"Bearer {TOKEN}"}
 URL = "/mcp/connections/github/credentials"
+
+N8N_URL = fake_mcp_server.start()
+N8N_TOKEN = "n8n_api_supersecret0987654321"
+N8N_BODY = {"url": N8N_URL, "Authorization": N8N_TOKEN}
+N8N_PUT = "/mcp/connections/n8n/credentials"
 
 
 def _fake_github_server() -> FastMCP:
@@ -69,6 +76,10 @@ def _connect(client: TestClient):
     return client.put(URL, json=BODY)
 
 
+def _entry(response, slug: str) -> dict:
+    return next(e for e in response.json() if e["server"] == slug)
+
+
 # --- GET /mcp/connections ---------------------------------------------------
 
 
@@ -76,8 +87,7 @@ def test_list_before_any_connection_has_the_registry_fields_and_no_connection(cl
     response = client.get("/mcp/connections")
 
     assert response.status_code == 200
-    [entry] = response.json()
-    assert entry["server"] == "github"
+    entry = next(e for e in response.json() if e["server"] == "github")
     assert entry["title"] and entry["description"]
     assert entry["connection"] is None
     [field] = entry["credentialFields"]
@@ -93,7 +103,7 @@ def test_list_after_connecting_shows_stored_state_and_never_the_secret(client):
 
     response = client.get("/mcp/connections")
 
-    assert response.json()[0]["connection"] == {
+    assert _entry(response, "github")["connection"] == {
         "enabled": True,
         "login": "octocat",
         "scopes": ["repo", "read:org"],
@@ -119,7 +129,7 @@ def test_list_surfaces_a_recorded_last_error(client):
     _connect(client)
     store.set_last_error("github", "token revoked")
 
-    assert client.get("/mcp/connections").json()[0]["connection"]["lastError"] == "token revoked"
+    assert _entry(client.get("/mcp/connections"), "github")["connection"]["lastError"] == "token revoked"
 
 
 # --- PUT /mcp/connections/{server}/credentials ------------------------------
@@ -280,9 +290,9 @@ def test_patch_toggles_enabled_and_nothing_else(client):
     _connect(client)
 
     assert client.patch("/mcp/connections/github", json={"enabled": False}).status_code == 200
-    assert client.get("/mcp/connections").json()[0]["connection"]["enabled"] is False
+    assert _entry(client.get("/mcp/connections"), "github")["connection"]["enabled"] is False
     assert client.patch("/mcp/connections/github", json={"enabled": True}).status_code == 200
-    connection = client.get("/mcp/connections").json()[0]["connection"]
+    connection = _entry(client.get("/mcp/connections"), "github")["connection"]
     assert connection["enabled"] is True
     assert connection["login"] == "octocat"
 
@@ -315,7 +325,7 @@ def test_delete_removes_credentials_and_state(client):
     assert response.status_code == 204
     assert response.content == b""
     assert store.load() == {}
-    assert client.get("/mcp/connections").json()[0]["connection"] is None
+    assert _entry(client.get("/mcp/connections"), "github")["connection"] is None
 
 
 def test_delete_is_idempotent(client):
@@ -365,6 +375,144 @@ def test_no_secret_appears_in_any_response_or_log_line(client, caplog, github_us
 def test_a_connection_without_login_or_scopes_is_listed_without_them(client):
     store.save_connection("github", BODY, tool_count=2)
 
-    connection = client.get("/mcp/connections").json()[0]["connection"]
+    connection = _entry(client.get("/mcp/connections"), "github")["connection"]
 
     assert connection == {"enabled": True, "toolCount": 2, "lastError": None}
+
+
+# --- n8n: URL + token, validated by connecting and listing tools -------------
+
+
+@pytest.fixture(autouse=True)
+def _fake_server_state(monkeypatch):
+    fake_mcp_server.SEEN_AUTH.clear()
+    monkeypatch.setattr(fake_mcp_server, "REJECT_AUTH", False)
+
+
+def test_list_has_the_n8n_entry_with_a_plain_url_field_and_a_secret_token_field(client):
+    entry = _entry(client.get("/mcp/connections"), "n8n")
+
+    assert entry["title"] and entry["description"]
+    assert entry["connection"] is None
+    url, token = entry["credentialFields"]
+    assert (url["name"], url["isSecret"], url["isRequired"]) == ("url", False, True)
+    assert (token["name"], token["isSecret"], token["isRequired"]) == ("Authorization", True, True)
+    assert url["description"] and token["description"]
+
+
+def test_n8n_save_validates_by_listing_tools_and_reports_the_count_without_login_or_scopes(client):
+    response = client.put(N8N_PUT, json=N8N_BODY)
+
+    assert response.status_code == 200
+    assert response.json() == {"toolCount": 3, "enabled": True}
+    assert store.load()["n8n"]["credentials"] == N8N_BODY
+    assert fake_mcp_server.SEEN_AUTH and set(fake_mcp_server.SEEN_AUTH) == {f"Bearer {N8N_TOKEN}"}
+
+
+def test_n8n_list_returns_the_url_and_never_the_token(client):
+    client.put(N8N_PUT, json=N8N_BODY)
+
+    response = client.get("/mcp/connections")
+
+    assert _entry(response, "n8n")["connection"] == {
+        "enabled": True,
+        "toolCount": 3,
+        "lastError": None,
+        "values": {"url": N8N_URL},
+    }
+    assert N8N_TOKEN not in response.text
+
+
+@pytest.mark.parametrize("url", ["not a url", "localhost:5678/mcp", "ftp://host/mcp", "http://", ""])
+def test_n8n_malformed_url_is_422_before_any_connection_attempt(client, monkeypatch, url):
+    def boom(*args, **kwargs):
+        raise AssertionError("must not connect")
+
+    monkeypatch.setattr(mcp_app, "Client", boom)
+
+    response = client.put(N8N_PUT, json={"url": url, "Authorization": N8N_TOKEN})
+
+    assert response.status_code == 422
+    assert list(response.json()) == ["error"]
+    assert N8N_TOKEN not in response.text
+    assert store.load() == {}
+
+
+def test_n8n_plain_http_urls_are_accepted(client):
+    assert N8N_URL.startswith("http://")
+    assert client.put(N8N_PUT, json=N8N_BODY).status_code == 200
+
+
+def test_n8n_unreachable_host_is_a_failure_to_connect(client):
+    response = client.put(N8N_PUT, json={**N8N_BODY, "url": fake_mcp_server.dead_url()})
+
+    assert response.status_code == 502
+    assert response.json()["error"]
+    assert N8N_TOKEN not in response.text
+    assert store.load() == {}
+
+
+def test_n8n_rejected_token_is_a_failure_to_connect(client, monkeypatch):
+    monkeypatch.setattr(fake_mcp_server, "REJECT_AUTH", True)
+
+    response = client.put(N8N_PUT, json=N8N_BODY)
+
+    assert response.status_code == 502
+    assert N8N_TOKEN not in response.text
+    assert store.load() == {}
+
+
+def test_an_n8n_error_that_quotes_the_token_is_redacted_but_the_url_is_not(client, monkeypatch):
+    def leaky(credentials):
+        raise RuntimeError(f"{credentials['url']} refused {credentials['Authorization']}")
+
+    monkeypatch.setattr(servers.SERVERS["n8n"], "build_transport", leaky)
+
+    response = client.put(N8N_PUT, json=N8N_BODY)
+
+    assert response.status_code == 502
+    error = response.json()["error"]
+    assert N8N_TOKEN not in error and "***" in error
+    assert N8N_URL in error
+
+
+@pytest.mark.parametrize("missing", ["url", "Authorization"])
+def test_n8n_needs_both_fields(client, missing):
+    body = {k: v for k, v in N8N_BODY.items() if k != missing}
+
+    assert client.put(N8N_PUT, json=body).status_code == 422
+    assert store.load() == {}
+
+
+def test_n8n_resubmit_can_rotate_the_token_and_keeps_enabled(client):
+    client.put(N8N_PUT, json=N8N_BODY)
+    client.patch("/mcp/connections/n8n", json={"enabled": False})
+
+    response = client.put(N8N_PUT, json={**N8N_BODY, "Authorization": "Bearer rotated"})
+
+    assert response.json() == {"toolCount": 3, "enabled": False}
+    assert store.load()["n8n"]["credentials"] == {"url": N8N_URL, "Authorization": "Bearer rotated"}
+
+
+def test_n8n_and_github_are_enabled_disabled_and_removed_independently(client):
+    _connect(client)
+    client.put(N8N_PUT, json=N8N_BODY)
+
+    client.patch("/mcp/connections/n8n", json={"enabled": False})
+    connections = {e["server"]: e["connection"] for e in client.get("/mcp/connections").json()}
+    assert (connections["n8n"]["enabled"], connections["github"]["enabled"]) == (False, True)
+
+    client.delete("/mcp/connections/n8n")
+    assert list(store.load()) == ["github"]
+    assert store.load()["github"]["enabled"] is True
+
+
+def test_no_n8n_secret_appears_in_any_response_or_log_line(client, caplog, monkeypatch):
+    caplog.set_level(logging.DEBUG)
+    seen = [client.put(N8N_PUT, json=N8N_BODY).text, client.get("/mcp/connections").text]
+    monkeypatch.setattr(fake_mcp_server, "REJECT_AUTH", True)
+    seen.append(client.put(N8N_PUT, json=N8N_BODY).text)
+    seen.append(client.put(N8N_PUT, json={**N8N_BODY, "url": "nope"}).text)
+
+    assert N8N_TOKEN not in "".join(seen)
+    assert N8N_TOKEN not in caplog.text

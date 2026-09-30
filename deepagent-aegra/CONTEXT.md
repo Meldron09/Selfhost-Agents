@@ -19,7 +19,7 @@ The opaque identifier the upload/download HTTP app issues for a file on local di
 _Avoid_: "path", "id" (too generic — always say "Key")
 
 **Connection**:
-A persisted record that the curated GitHub MCP server has been authenticated and is available to the orchestrator — its stored credentials plus its enabled/disabled state, held in the Connection Store. Established once via the auth window in agent-chat-ui's Settings surface. Unlike `web-search`'s per-run toggle, a Connection's enabled state persists across runs until switched off (see ADR-0008). Modeled to hold more than one Connection (a second curated server was researched and deferred — see CONTEXT.md history / issue #22 — not foreclosed, just not built yet).
+A persisted record that a curated MCP server (currently GitHub and n8n) has been authenticated and is available to the orchestrator — its stored credentials plus its enabled/disabled state, held in the Connection Store. Established once via the auth window in agent-chat-ui's Settings surface. Unlike `web-search`'s per-run toggle, a Connection's enabled state persists across runs until switched off (see ADR-0008). Holds more than one Connection at a time. A Connection's credentials are whatever its Registry Entry declares: for GitHub just the token, for n8n the instance's MCP URL plus an access token (the URL is per-instance, so the person supplies it rather than the project hardcoding it).
 _Avoid_: "integration" (too vague), "session" (a Connection outlives any single run)
 
 **Connection Store**:
@@ -27,11 +27,11 @@ The local, encrypted-at-rest file holding every Connection's credentials and ena
 _Avoid_: "vault", "secrets manager" — those imply multi-tenant machinery this deliberately isn't
 
 **Registry Entry**:
-The pinned `server.json` record for the curated GitHub MCP server (`io.github.github/github-mcp-server`), fetched from the official MCP Registry (registry.modelcontextprotocol.io) and used as the source of truth for what credential fields a Connection needs — read by both agent-chat-ui (to render the auth window's fields) and deepagent-aegra (to know what to store and pass to the MCP client). Pinned to a specific known-good server name, never resolved by a live search, since the Registry is open to anyone to publish to (see ADR-0009).
-_Avoid_: "manifest", "server config" — Registry Entry ties it explicitly back to the external Registry as the source
+The pinned `server.json` record for a curated MCP server, used as the source of truth for what credential fields a Connection needs — read by both agent-chat-ui (to render the auth window's fields) and deepagent-aegra (to know what to store and pass to the MCP client). Where the server is published in the official MCP Registry (registry.modelcontextprotocol.io), as GitHub's is (`io.github.github/github-mcp-server`), the entry is fetched from there and pinned to that known-good name, never resolved by a live search, since the Registry is open to anyone to publish to. Where it isn't (n8n is a self-hosted instance with no public listing), the entry is hand-authored in the same `server.json` shape (see ADR-0009).
+_Avoid_: "manifest", "server config" — Registry Entry ties it to the `server.json` format as the source of truth
 
 **Auth Mode**:
-How a Connection's credentials get collected. Currently just **Credential Form** (paste a static secret — a GitHub PAT — no browser involved), used for the GitHub Connection. A second mode, **Device Code** (the auth window shows a short code and a verification URL, then polls until the person finishes signing in elsewhere), was designed for a since-deferred Microsoft 365 connection and would revive as a second content rendering of the same auth-window modal if that comes back.
+How a Connection's credentials get collected. Currently just **Credential Form** (paste a static secret — a GitHub PAT or an n8n access token, plus any non-secret fields like n8n's URL — no browser involved), used for the GitHub and n8n Connections. A second mode, **Device Code** (the auth window shows a short code and a verification URL, then polls until the person finishes signing in elsewhere), was designed for a since-deferred Microsoft 365 connection and would revive as a second content rendering of the same auth-window modal if that comes back.
 _Avoid_: "OAuth" alone for Device Code — both modes are ultimately backed by app credentials of some kind; Device Code specifically names the interactive polling flow.
 
 ### Roles

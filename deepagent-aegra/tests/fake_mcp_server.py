@@ -2,7 +2,7 @@
 
 Tools: `read_thing` (readOnlyHint=True), `write_thing` (False) and `mystery`
 (no annotations). `SEEN_AUTH` records each POST's Authorization header; `CALLS`
-the name of every tool that actually ran.
+the name of every tool that actually ran. Set `REJECT_AUTH` to make it answer 401.
 """
 from __future__ import annotations
 
@@ -12,9 +12,11 @@ import time
 
 import uvicorn
 from fastmcp import FastMCP
+from starlette.responses import Response
 
 SEEN_AUTH: list[str | None] = []
 CALLS: list[str] = []
+REJECT_AUTH = False
 
 
 def _build() -> FastMCP:
@@ -48,6 +50,8 @@ class _Spy:
         if scope["type"] == "http" and scope["method"] == "POST":
             headers = dict(scope["headers"])
             SEEN_AUTH.append(headers.get(b"authorization", b"").decode() or None)
+            if REJECT_AUTH:
+                return await Response("unauthorized", status_code=401)(scope, receive, send)
         return await self.app(scope, receive, send)
 
 

@@ -1,0 +1,27 @@
+{
+  "name": "local/n8n-instance-mcp",
+  "version": "1",
+  "description": "Hand-authored: n8n is self-hosted with no public Registry listing (ADR-0009 amendment).",
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "{url}",
+      "variables": {
+        "url": {
+          "description": "Your n8n instance's MCP URL (Settings -> Instance-level MCP), e.g. https://n8n.example.com/mcp-server/http",
+          "isRequired": true,
+          "isSecret": false,
+          "format": "string"
+        }
+      },
+      "headers": [
+        {
+          "name": "Authorization",
+          "isRequired": true,
+          "isSecret": true,
+          "description": "n8n MCP access token (bare or with the Bearer prefix)"
+        }
+      ]
+    }
+  ]
+}

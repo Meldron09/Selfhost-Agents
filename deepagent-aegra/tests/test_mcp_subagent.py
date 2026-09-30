@@ -49,6 +49,10 @@ def _connect(name: str, url: str = URL, **kw) -> None:
     store.save_connection(name, {"Authorization": f"Bearer tok-{name}", "url": url}, login=name, scopes=[], **kw)
 
 
+def _connect_n8n(url: str = URL, token: str = "Bearer tok-n8n", **kw) -> None:
+    store.save_connection("n8n", {"url": url, "Authorization": token}, **kw)
+
+
 def _tool_names(messages) -> list[str]:
     return [c["name"] for m in messages if isinstance(m, AIMessage) for c in (m.tool_calls or [])]
 
@@ -81,11 +85,11 @@ def _inner(calls: list[str], seen: list, turns: list):
 
 
 class _Run:
-    def __init__(self, inner_calls=("github_read_thing",)):
+    def __init__(self, inner_calls=("github_read_thing",), inner=None):
         self.bound: list = []
         self.turns: list[int] = []
         self.agent = build_agent(
-            model=_Both(_outer, _inner(list(inner_calls), self.bound, self.turns)),
+            model=_Both(_outer, inner or _inner(list(inner_calls), self.bound, self.turns)),
             settings=_SETTINGS,
             checkpointer=InMemorySaver(),
         )
@@ -380,3 +384,157 @@ def test_a_connection_for_an_unknown_server_fails_with_a_reason():
 
     assert "Unknown MCP server 'gone'" in reply
     assert "Unknown MCP server 'gone'" in store.load()["gone"]["lastError"]
+
+
+# --- n8n: the second Connection, reached through the real (unpatched) seam ------
+
+
+def test_github_and_n8n_both_enabled_expose_both_prefixes_in_one_delegation():
+    _connect("github")
+    _connect_n8n()
+    run = _Run()
+
+    run.ask()
+
+    bound = set(run.bound[0])
+    assert {"github_read_thing", "github_write_thing", "n8n_read_thing", "n8n_write_thing"} <= bound
+    assert set(fake_mcp_server.SEEN_AUTH) == {"Bearer tok-github", "Bearer tok-n8n"}
+
+
+@pytest.mark.parametrize("stored", ["tok-n8n", "Bearer tok-n8n", "bearer tok-n8n"])
+def test_n8n_sends_bearer_exactly_once_whatever_is_stored(stored):
+    _connect_n8n(token=stored)
+
+    _Run(("n8n_read_thing",)).ask()
+
+    assert [a.lower() for a in fake_mcp_server.SEEN_AUTH] == ["bearer tok-n8n"] * len(fake_mcp_server.SEEN_AUTH)
+    assert fake_mcp_server.SEEN_AUTH
+
+
+def test_a_dead_n8n_does_not_sink_github_and_its_last_error_is_recorded_without_the_token():
+    _connect("github")
+    _connect_n8n(url=fake_mcp_server.dead_url(), token="Bearer tok-n8n-secret")
+
+    run = _Run()
+    reply = run.ask()
+
+    assert "thing:x" in reply
+    assert "github_read_thing" in run.bound[0]
+    assert not any(n.startswith("n8n_") for n in run.bound[0])
+    conns = store.load()
+    assert conns["n8n"]["lastError"]
+    assert "tok-n8n-secret" not in conns["n8n"]["lastError"]
+    assert conns["github"]["lastError"] is None
+
+
+def test_a_dead_github_does_not_sink_n8n():
+    _connect("github", url=fake_mcp_server.dead_url())
+    _connect_n8n()
+
+    run = _Run(("n8n_read_thing",))
+    reply = run.ask()
+
+    assert "thing:x" in reply
+    assert store.load()["github"]["lastError"]
+    assert store.load()["n8n"]["lastError"] is None
+
+
+def test_a_rejected_n8n_token_is_relayed_when_it_is_the_only_connection(monkeypatch):
+    monkeypatch.setattr(fake_mcp_server, "REJECT_AUTH", True)
+    _connect_n8n(token="Bearer tok-n8n-secret")
+
+    reply = _Run().ask()
+
+    assert "Could not connect" in reply and "n8n" in reply
+    assert "tok-n8n-secret" not in reply
+    assert "tok-n8n-secret" not in store.load()["n8n"]["lastError"]
+
+
+def test_n8n_write_and_unannotated_tools_are_gated_then_resume_on_approve():
+    _connect_n8n()
+    run = _Run(("n8n_read_thing", "n8n_mystery", "n8n_write_thing"))
+
+    first = run.start()
+
+    [request_set] = first["__interrupt__"]
+    assert [a["name"] for a in request_set.value["action_requests"]] == ["n8n_mystery", "n8n_write_thing"]
+    assert {c["allowed_decisions"][0] for c in request_set.value["review_configs"]} == {"approve"}
+    assert fake_mcp_server.CALLS == []
+
+    done = run.resume({"decisions": [{"type": "reject", "message": "no"}, {"type": "approve"}]})
+
+    assert "__interrupt__" not in done
+    assert sorted(fake_mcp_server.CALLS) == ["read_thing", "write_thing"]
+
+
+def test_an_approved_n8n_write_that_is_retried_asks_again():
+    _connect_n8n()
+
+    def retrying(messages, tools):
+        if isinstance(messages[-1], HumanMessage) or sum(m.type == "tool" for m in messages) < 2:
+            k = sum(m.type == "ai" for m in messages)
+            return AIMessage(
+                content="", tool_calls=[{"name": "n8n_write_thing", "args": {"name": "x"}, "id": f"w{k}"}]
+            )
+        return AIMessage(content="inner: done")
+
+    run = _Run(inner=retrying)
+    run.start()
+
+    again = run.resume(APPROVE)
+
+    assert fake_mcp_server.CALLS == ["write_thing"]  # the first approval ran once...
+    assert len(again["__interrupt__"]) == 1  # ...and the replayed write is asked about again
+
+    run.resume(APPROVE)
+    assert fake_mcp_server.CALLS == ["write_thing", "write_thing"]
+
+
+def test_disabling_n8n_mid_approval_drops_the_pending_call_even_if_github_remains():
+    _connect("github")
+    _connect_n8n()
+    run = _Run(("n8n_write_thing",))
+    run.start()
+
+    store.set_enabled("n8n", False)
+    run.resume(APPROVE)
+
+    assert fake_mcp_server.CALLS == []
+
+
+def test_disabling_n8n_takes_effect_on_the_next_delegation():
+    _connect("github")
+    _connect_n8n()
+    run = _Run()
+    run.ask("t1")
+    assert "n8n_read_thing" in run.bound[-1]
+
+    store.set_enabled("n8n", False)
+    run.ask("t2")
+
+    assert not any(n.startswith("n8n_") for n in run.bound[-1])
+
+
+@pytest.mark.parametrize(
+    "slug, timeouts",
+    [("github", {"init_timeout": 30, "timeout": 60}), ("n8n", {"init_timeout": 30, "timeout": 300})],
+)
+def test_each_server_is_connected_with_its_own_timeouts(monkeypatch, slug, timeouts):
+    seen = {}
+    real_client = subagent.Client
+
+    def spy(transport, **kwargs):
+        seen.update(kwargs)
+        return real_client(transport, **kwargs)
+
+    monkeypatch.setattr(subagent, "Client", spy)
+    _connect("github") if slug == "github" else _connect_n8n()
+
+    _Run().ask()
+
+    assert seen == timeouts
+
+
+def test_the_subagent_wording_is_server_agnostic():
+    assert "github" not in subagent.DESCRIPTION.lower()
+    assert "github" not in subagent.SYSTEM_PROMPT.lower()
