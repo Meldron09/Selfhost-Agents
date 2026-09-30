@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import os
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
@@ -109,7 +110,7 @@ def test_corrupt_file_is_a_loud_error_and_never_resets(tmp_path):
 
 
 def test_valid_ciphertext_with_unknown_schema_version_is_an_error(tmp_path):
-    key = store.os.environ["MCP_STORE_KEY"].encode()
+    key = os.environ["MCP_STORE_KEY"].encode()
     doc = json.dumps({"version": 2, "connections": {}}).encode()
     _file(tmp_path).write_bytes(Fernet(key).encrypt(doc))
     with pytest.raises(store.StoreError, match="version"):
@@ -140,4 +141,12 @@ def test_missing_key_fails_loud_on_first_touch_not_at_import(monkeypatch):
 def test_malformed_key_is_a_loud_error(monkeypatch):
     monkeypatch.setenv("MCP_STORE_KEY", "not-a-fernet-key")
     with pytest.raises(store.StoreError, match="MCP_STORE_KEY"):
+        store.load()
+
+
+def test_valid_ciphertext_without_a_connections_mapping_is_a_store_error(tmp_path):
+    key = os.environ["MCP_STORE_KEY"].encode()
+    doc = json.dumps({"version": 1}).encode()
+    _file(tmp_path).write_bytes(Fernet(key).encrypt(doc))
+    with pytest.raises(store.StoreError):
         store.load()

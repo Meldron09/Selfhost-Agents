@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import os
 import threading
+from collections.abc import Callable
 from typing import Any
 
 from cryptography.fernet import Fernet, InvalidToken
@@ -71,6 +72,9 @@ def _read(fernet: Fernet) -> dict[str, dict[str, Any]]:
     if not isinstance(doc, dict) or doc.get("version") != _VERSION:
         msg = f"{path} has an unsupported schema version (expected {_VERSION})."
         raise StoreError(msg)
+    if not isinstance(doc.get("connections"), dict):
+        msg = f"{path} is malformed: no `connections` mapping."
+        raise StoreError(msg)
     return doc["connections"]
 
 
@@ -87,7 +91,7 @@ def _write(fernet: Fernet, connections: dict[str, dict[str, Any]]) -> None:
     os.replace(tmp, directory / _FILENAME)
 
 
-def _modify(mutate) -> None:
+def _modify(mutate: Callable[[dict[str, dict[str, Any]]], object]) -> None:
     """Read-modify-write under the lock; `mutate` edits the connections dict."""
     with _LOCK:
         fernet = _fernet()

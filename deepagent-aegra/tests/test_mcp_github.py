@@ -78,3 +78,15 @@ def test_probe_bearer_exactly_once_whatever_is_stored(stored):
 
     _probe(handler, token=stored)
     assert seen["auth"] == "Bearer ghp_abc"
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        httpx.Response(200, text="<html>captive portal</html>"),
+        httpx.Response(200, json={"no": "login"}),
+    ],
+)
+def test_probe_200_with_an_unexpected_body_is_unreachable(response):
+    with pytest.raises(github.GitHubUnreachable):
+        _probe(lambda request: response)

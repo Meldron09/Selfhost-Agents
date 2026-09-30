@@ -64,7 +64,12 @@ async def probe_token(token: str, *, client: httpx.AsyncClient | None = None) ->
         raise GitHubUnreachable(msg)
     raw = response.headers.get("X-OAuth-Scopes", "")
     scopes = [s.strip() for s in raw.split(",") if s.strip()]
-    return TokenInfo(login=response.json()["login"], scopes=scopes)
+    try:
+        login = response.json()["login"]
+    except (ValueError, KeyError, TypeError) as exc:
+        msg = "api.github.com answered 200 without a usable `login`"
+        raise GitHubUnreachable(msg) from exc
+    return TokenInfo(login=login, scopes=scopes)
 
 
 def build_transport(credentials: dict[str, str]) -> StreamableHttpTransport:
