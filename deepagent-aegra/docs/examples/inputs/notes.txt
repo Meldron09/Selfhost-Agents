@@ -1,0 +1,1 @@
+Team sync, 6 Oct 2026. We agreed to ship the Skills page next week. Priya will finish the history view. Sam is blocked on the n8n connection and will ask for credentials. We utilise a weekly demo to catch issues early!

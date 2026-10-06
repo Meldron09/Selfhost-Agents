@@ -81,6 +81,7 @@ Set these in `deepagent-aegra/.env`, then restart the backend.
 
 - [`deepagent-aegra/README.md`](deepagent-aegra/README.md): commands for testing, running, and checking the backend, plus a map of the code.
 - [`deepagent-aegra/docs/skill-ui-contract.md`](deepagent-aegra/docs/skill-ui-contract.md): the one-page guide for writing a Skill UI (folder layout, the `submit`/`status` messages, sandbox limits, a copy-paste helper).
+- [`deepagent-aegra/docs/examples/`](deepagent-aegra/docs/examples): ready-to-upload sample Skill zips (plus zips that should be refused, and sample input files) for trying the Skills page by hand.
 - [`deepagent-aegra/CONTEXT.md`](deepagent-aegra/CONTEXT.md): the project's vocabulary (Attachment, Output, Connection, and so on).
 - [`deepagent-aegra/docs/adr/`](deepagent-aegra/docs/adr): why each major design decision was made.
 - [`docs/research/`](docs/research): research and spikes behind those decisions.
