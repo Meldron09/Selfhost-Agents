@@ -155,6 +155,26 @@ def get_skill(name: str) -> dict[str, Any]:
     return entry
 
 
+def instructions(name: str) -> str:
+    """The `SKILL.md` body (what follows the frontmatter) of the installed Skill `name`."""
+    get_skill(name)  # 404 for an unknown or broken Skill
+    text = (skill_library_dir() / name / "SKILL.md").read_text(encoding="utf-8", errors="replace")
+    return _FRONTMATTER.sub("", text, count=1).strip()
+
+
+def reference_files(name: str) -> dict[str, bytes]:
+    """`{relative path: bytes}` of the Skill's reference files: everything but `SKILL.md` and `ui/`."""
+    get_skill(name)
+    folder = skill_library_dir() / name
+    return {
+        rel: path.read_bytes()
+        for path in sorted(folder.rglob("*"))
+        if path.is_file()
+        and (rel := path.relative_to(folder).as_posix()) != "SKILL.md"
+        and PurePosixPath(rel).parts[0] != "ui"
+    }
+
+
 def install(data: bytes) -> dict[str, Any]:
     return _guarded(data, replacing=None)
 

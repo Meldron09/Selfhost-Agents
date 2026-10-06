@@ -19,6 +19,7 @@ from langgraph.graph.state import CompiledStateGraph
 from agent.attachment_ack import AttachmentAcknowledgeMiddleware
 from agent.config import Settings, get_settings
 from agent.model import get_model
+from agent.skill_run import SkillRunMiddleware
 from agent.state import DeepAgentAegraState
 from agent.subagents import build_subagents
 from agent.web_search_gate import WebSearchGateMiddleware
@@ -76,6 +77,7 @@ def _build_middleware(settings: Settings, model: BaseChatModel) -> list[AgentMid
     backstop.
     """
     middleware: list[AgentMiddleware] = [
+        SkillRunMiddleware(),
         AttachmentAcknowledgeMiddleware(),
         WebSearchGateMiddleware(),
     ]

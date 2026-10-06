@@ -38,3 +38,5 @@ class DeepAgentAegraState(DeepAgentState):
 
     outputs: NotRequired[Annotated[list[OutputRef], operator.add]]
     attachments: NotRequired[Annotated[list[AttachmentRef], operator.add]]
+    skill_run_context: NotRequired[str]
+    """A Skill Run's rendered instructions/inputs, set once by `SkillRunMiddleware` (issue #45)."""

@@ -187,6 +187,37 @@ def test_output_writer_run_makes_no_blocking_calls_from_our_code(
     assert (tmp_path / result["outputs"][0]["key"]).read_text() == "hi"
 
 
+def test_a_skill_run_makes_no_blocking_calls_from_our_code(tmp_path, monkeypatch: pytest.MonkeyPatch):
+    """`SkillRunMiddleware` reads the Skill Library and writes the file store;
+    its async hook must hand that to a thread, not do it on the loop (#45).
+    """
+    from agent.skills import library
+    from tests.test_skills_app import SKILL_MD, make_zip
+
+    monkeypatch.setenv("OLLAMA_MODEL", "test-model")
+    monkeypatch.setenv("OLLAMA_CONTEXT_WINDOW", "32768")
+    monkeypatch.setenv("FILE_STORE_DIR", str(tmp_path / "files"))
+    monkeypatch.setenv("SKILL_LIBRARY_DIR", str(tmp_path / "skills"))
+    library.install(make_zip({"SKILL.md": SKILL_MD, "rules.md": "r"}))
+
+    agent = build_agent(model=ScriptedChatModel(final_text="done"))
+
+    async def run():
+        return await agent.ainvoke(
+            {"messages": [HumanMessage(content="go")]},
+            config={
+                "configurable": {
+                    "thread_id": "t-block-skill",
+                    "skill_run": {"name": "reconcile", "fields": {}, "files": {}},
+                }
+            },
+        )
+
+    result = _run_guarded(run)
+
+    assert [a["filename"] for a in result["attachments"]] == ["rules.md"]
+
+
 def test_settings_do_not_call_getcwd_per_read(monkeypatch: pytest.MonkeyPatch):
     """Regression: `Path.resolve()` in settings broke every served run."""
     monkeypatch.setenv("OLLAMA_MODEL", "test-model")
