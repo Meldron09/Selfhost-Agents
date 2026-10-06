@@ -175,6 +175,17 @@ def reference_files(name: str) -> dict[str, bytes]:
     }
 
 
+def ui_file(name: str, path: str) -> Path:
+    """The file `path` inside the Skill's `ui/` folder (`index.html` for the bare folder); a
+    `SkillError` 404 for anything else, so nothing outside `ui/` is ever reachable."""
+    get_skill(name)
+    ui = (skill_library_dir() / name / "ui").resolve()
+    target = (ui / (path or "index.html")).resolve()
+    if ui not in target.parents or not target.is_file():
+        raise SkillError(404, f"No such file in the UI of {name!r}")
+    return target
+
+
 def install(data: bytes) -> dict[str, Any]:
     return _guarded(data, replacing=None)
 

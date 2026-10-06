@@ -304,3 +304,56 @@ def test_a_failed_swap_restores_the_old_skill(client, skills_dir, monkeypatch):
 
     assert (skills_dir / "reconcile" / "keep.md").read_text() == "original"
     assert [p.name for p in skills_dir.iterdir()] == ["reconcile"]
+
+
+# --- serving the Skill UI (ADR-0010) -----------------------------------------
+
+UI_ZIP = {
+    "SKILL.md": SKILL_MD,
+    "ui/index.html": "<script type=module src=./assets/app.js></script>",
+    "ui/assets/app.js": "export default 1",
+    "ui/assets/app.css": "body{}",
+    "ui/logo.svg": "<svg/>",
+    "rules.md": "secret rules",
+}
+
+
+def test_the_ui_tree_is_served_with_mime_types_cors_and_csp(client):
+    install(client, make_zip(UI_ZIP))
+
+    for path, mime in [
+        ("index.html", "text/html"),
+        ("assets/app.js", "text/javascript"),
+        ("assets/app.css", "text/css"),
+        ("logo.svg", "image/svg+xml"),
+    ]:
+        res = client.get(f"/skills/reconcile/ui/{path}")
+        assert res.status_code == 200, path
+        assert res.headers["content-type"].startswith(mime), path
+        assert res.headers["access-control-allow-origin"] == "*"
+        csp = res.headers["content-security-policy"]
+        assert "connect-src 'none'" in csp and "form-action 'none'" in csp
+    assert client.get("/skills/reconcile/ui/assets/app.js").text == "export default 1"
+
+
+def test_the_ui_route_serves_index_html_for_the_bare_folder(client):
+    install(client, make_zip(UI_ZIP))
+    assert client.get("/skills/reconcile/ui/").text == UI_ZIP["ui/index.html"]
+
+
+def test_only_the_ui_tree_is_served(client):
+    install(client, make_zip(UI_ZIP))
+
+    assert client.get("/skills/reconcile/ui/missing.js").status_code == 404
+    assert client.get("/skills/reconcile/ui/assets").status_code == 404  # a folder, not a file
+    assert client.get("/skills/nope/ui/index.html").status_code == 404
+    # Neither the Skill's instructions nor its reference files are reachable.
+    for escape in ["../SKILL.md", "../rules.md", "%2e%2e/SKILL.md", "..%2Frules.md"]:
+        res = client.get(f"/skills/reconcile/ui/{escape}")
+        assert res.status_code == 404, escape
+        assert "secret rules" not in res.text
+
+
+def test_a_skill_without_a_ui_serves_nothing(client):
+    install(client, make_zip({"SKILL.md": SKILL_MD, "rules.md": "r"}))
+    assert client.get("/skills/reconcile/ui/index.html").status_code == 404

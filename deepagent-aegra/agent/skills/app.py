@@ -1,7 +1,7 @@
 """The `/skills` routes behind agent-chat-ui's Skills page.
 
 A `FastAPI` router that `agent/files/app.py:create_app()` includes next to
-`/files` and `/mcp/connections` (aegra allows one `http.app`). Issues #43, #44; spec
+`/files` and `/mcp/connections` (aegra allows one `http.app`). Issues #43, #44, #46; spec
 in #41. Every handler is a plain `def` (see agent/files/app.py for why) and the
 router adds no middleware. No new auth: it inherits the deployment's (none).
 
@@ -30,11 +30,17 @@ installed Skill `name`. `200` with the new entry. Same validation and refusals
 as install, except no 409; also `404` if `name` is not installed, and `422` if
 the zip's own `name` differs. A refusal leaves the old Skill untouched.
 
+`GET /skills/{name}/ui/{path}` -> the file at `path` in the Skill's `ui/` folder (the bare
+`ui/` is `index.html`), with its MIME type, `Access-Control-Allow-Origin: *` and a CSP that
+blocks `fetch`/forms (ADR-0010). `404` for a missing file, a folder, a Skill with no `ui/`
+or anything outside `ui/`.
+
 `DELETE /skills/{name}` -> `204`, the Skill is gone from the library and the
 list; `404` if there is no such Skill. Confirming is the UI's job.
 """
 from __future__ import annotations
 
+import mimetypes
 from typing import Any
 
 from fastapi import APIRouter, File, UploadFile
@@ -44,6 +50,14 @@ from agent.skills import library
 from agent.skills.library import SkillError
 
 router = APIRouter(prefix="/skills")
+
+# A sandboxed frame has an opaque origin, so its own module scripts and assets load
+# cross-origin (needs the ACAO header), and the sandbox attribute alone leaves the API
+# reachable (needs the CSP). ADR-0010.
+_UI_HEADERS = {
+    "Access-Control-Allow-Origin": "*",
+    "Content-Security-Policy": "default-src 'self'; connect-src 'none'; form-action 'none'; img-src 'self' data:",
+}
 
 
 def _refusal(exc: SkillError) -> JSONResponse:
@@ -61,6 +75,19 @@ def get_skill(name: str) -> Any:
         return library.get_skill(name)
     except SkillError as exc:
         return _refusal(exc)
+
+
+@router.get("/{name}/ui/{path:path}")
+def get_skill_ui(name: str, path: str) -> Response:
+    try:
+        file = library.ui_file(name, path)
+    except SkillError as exc:
+        return _refusal(exc)
+    return Response(
+        file.read_bytes(),
+        media_type=mimetypes.guess_type(file.name)[0] or "application/octet-stream",
+        headers=_UI_HEADERS,
+    )
 
 
 @router.post("", status_code=201)

@@ -62,7 +62,8 @@ whenever a run's `configurable.enable_web_search` is on. See the parent spec:
   alongside the Agent Protocol routes via `aegra-host/http_app_adapter.py`
   (docs/adr/0004)
 - `agent/skills/` — the Skill Library: install (zip), replace, delete and list Skills as plain
-  folders under `SKILL_LIBRARY_DIR`, served as `/skills` (issues #43, #44)
+  folders under `SKILL_LIBRARY_DIR`, served as `/skills`, plus each Skill's `ui/` tree sandbox-ready at
+  `/skills/{name}/ui/…` (issues #43, #44, #46; author guide: docs/skill-ui-contract.md)
 - `agent/skill_run.py` — `SkillRunMiddleware`: a Skill Run's `SKILL.md` body, `fields` JSON, uploaded
   files and reference files (registered as Attachments) injected into the Orchestrator's prompt, from
   `configurable.skill_run` (issue #45, docs/adr/0011)
