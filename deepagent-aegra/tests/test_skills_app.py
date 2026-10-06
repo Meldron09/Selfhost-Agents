@@ -183,3 +183,16 @@ def test_name_clash_is_refused_and_leaves_the_original(client, skills_dir):
 
 def test_a_missing_upload_is_refused(client):
     assert client.post("/skills").status_code == 422
+
+
+# --- malformed zips are refused with a message, never a 500 -----------------
+
+
+def test_a_corrupt_entry_is_refused_and_writes_nothing(client, skills_dir):
+    data = make_zip({"SKILL.md": SKILL_MD, "ref.md": "unmistakable-content"})
+    data = data.replace(b"unmistakable-content", b"unmistakable-contenX")  # CRC no longer matches
+    refused(client, skills_dir, data, 422, "corrupt")
+
+
+def test_conflicting_paths_are_refused_and_write_nothing(client, skills_dir):
+    refused(client, skills_dir, make_zip({"SKILL.md": SKILL_MD, "a.md": "x", "a.md/b.md": "y"}), 422, "conflict")

@@ -13,6 +13,7 @@ import re
 import shutil
 import uuid
 import zipfile
+import zlib
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -73,6 +74,10 @@ def _unsafe(name: str) -> bool:
         or re.match(r"^[A-Za-z]:", name) is not None
         or ".." in path.parts
     )
+
+
+_CORRUPT = (zipfile.BadZipFile, RuntimeError, NotImplementedError, zlib.error, EOFError)
+"""What `zipfile` raises for a bad CRC, a lying header, encryption or an unknown codec."""
 
 
 def _plan(data: bytes) -> tuple[zipfile.ZipFile, dict[str, zipfile.ZipInfo], dict[str, str]]:
@@ -146,6 +151,13 @@ def get_skill(name: str) -> dict[str, Any]:
 
 
 def install(data: bytes) -> dict[str, Any]:
+    try:
+        return _install(data)
+    except _CORRUPT:
+        raise SkillError(422, "The zip is corrupt or uses an unsupported feature (such as a password)") from None
+
+
+def _install(data: bytes) -> dict[str, Any]:
     archive, files, meta = _plan(data)
     root = skill_library_dir()
     dest = root / meta["name"]
@@ -161,8 +173,12 @@ def install(data: bytes) -> dict[str, Any]:
             target.write_bytes(archive.read(info))
         try:
             tmp.rename(dest)
-        except OSError:  # lost a race for the same name
+        except OSError:
+            if not dest.exists():
+                raise
             raise SkillError(409, f"A Skill named {meta['name']!r} already exists") from None
+    except (FileExistsError, NotADirectoryError):
+        raise SkillError(422, "The zip has conflicting paths (a file and a folder share a name)") from None
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     return get_skill(meta["name"])
