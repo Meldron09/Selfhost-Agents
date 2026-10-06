@@ -41,6 +41,16 @@ def mcp_state_dir() -> Path:
     return _abs_path("MCP_STATE_DIR", "./mcp-state")
 
 
+def skill_library_dir() -> Path:
+    """Where the Skill Library lives (issue #43): one plain folder per Skill.
+
+    Its own directory on its own volume, never under `FILE_STORE_DIR`, which
+    `/files/{key}` serves. Standalone (not via `Settings`) like `mcp_state_dir`,
+    so the routes need no model-plane env vars.
+    """
+    return _abs_path("SKILL_LIBRARY_DIR", "./skills")
+
+
 def _require(name: str) -> str:
     value = os.getenv(name)
     if not value or not value.strip():

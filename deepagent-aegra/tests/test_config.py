@@ -83,3 +83,13 @@ def test_mcp_state_dir_reads_the_environment(monkeypatch: pytest.MonkeyPatch, tm
     monkeypatch.setenv("OLLAMA_CONTEXT_WINDOW", "32768")
     monkeypatch.setenv("MCP_STATE_DIR", str(tmp_path))
     assert get_settings().mcp_state_dir == tmp_path
+
+
+def test_skill_library_dir_defaults_and_reads_the_environment(monkeypatch: pytest.MonkeyPatch, tmp_path):
+    from agent.config import skill_library_dir
+
+    monkeypatch.delenv("SKILL_LIBRARY_DIR", raising=False)
+    assert skill_library_dir().is_absolute()
+    assert skill_library_dir().name == "skills"
+    monkeypatch.setenv("SKILL_LIBRARY_DIR", str(tmp_path))
+    assert skill_library_dir() == tmp_path

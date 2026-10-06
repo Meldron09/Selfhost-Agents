@@ -8,6 +8,8 @@ psycopg[binary,pool]>=3.2           # ditto
 
 cryptography>=42                    # agent/mcp/store.py: Fernet-encrypted Connection Store
 
+pyyaml>=6.0                         # agent/skills: SKILL.md frontmatter
+
 python-dotenv>=1.0                  # scripts/verify_stack.py loads .env directly
 
 fastapi>=0.115               # agent/files: the upload/download HTTP app

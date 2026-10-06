@@ -8,3 +8,4 @@ data/*
 .langgraph_api/
 aegra-host/aegra.json
 mcp-state/
+/skills/

@@ -77,3 +77,24 @@ def test_the_connection_store_is_never_under_the_served_file_store():
     files_dir = _FILE_STORE_DIR_ENV.search(compose).group(1).rstrip("/")
     mcp_dir = _MCP_STATE_DIR_ENV.search(compose).group(1).rstrip("/")
     assert not (mcp_dir + "/").startswith(files_dir + "/")
+
+
+_SKILLS_MOUNT = re.compile(r"deepagent-aegra-skills:(/\S+)")
+_SKILL_LIBRARY_DIR_ENV = re.compile(r"SKILL_LIBRARY_DIR:\s*(\S+)")
+
+
+def test_skill_library_dir_is_absolute_and_matches_its_own_volume():
+    compose = _read()
+    env = _SKILL_LIBRARY_DIR_ENV.search(compose)
+    mount = _SKILLS_MOUNT.search(compose)
+    assert env, "docker-compose.yml must set SKILL_LIBRARY_DIR explicitly"
+    assert mount, "docker-compose.yml must mount the deepagent-aegra-skills volume"
+    assert env.group(1) == mount.group(1) == "/app/skills"
+    assert re.search(r"^volumes:\n(?:.*\n)*?\s+deepagent-aegra-skills:\s*$", compose, re.M)
+
+
+def test_the_skill_library_is_never_under_the_served_file_store():
+    compose = _read()
+    files_dir = _FILE_STORE_DIR_ENV.search(compose).group(1).rstrip("/")
+    skills_dir = _SKILL_LIBRARY_DIR_ENV.search(compose).group(1).rstrip("/")
+    assert not (skills_dir + "/").startswith(files_dir + "/")

@@ -60,6 +60,9 @@ services:
       # FILE_STORE_DIR, and on its own volume — never under /app/data, whose
       # contents `/files/{key}` serves.
       MCP_STATE_DIR: /app/mcp-state
+      # The Skill Library (issue #43): plain Skill folders, on its own volume
+      # and never under /app/data, whose contents `/files/{key}` serves.
+      SKILL_LIBRARY_DIR: /app/skills
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
@@ -71,6 +74,8 @@ services:
       - deepagent-aegra-files:/app/data
       # Encrypted MCP credentials, separate from the file store above.
       - deepagent-aegra-mcp:/app/mcp-state
+      # Installed Skills, separate from the file store above.
+      - deepagent-aegra-skills:/app/skills
     ports:
       - "${PORT:-8000}:8000"
     depends_on:
@@ -81,3 +86,4 @@ volumes:
   deepagent-aegra-pg-data:
   deepagent-aegra-files:
   deepagent-aegra-mcp:
+  deepagent-aegra-skills:
