@@ -6,7 +6,9 @@ the module docstring of agent/skills/app.py.
 from __future__ import annotations
 
 import io
+import re
 import zipfile
+from pathlib import Path
 
 import pytest
 from starlette.testclient import TestClient
@@ -357,3 +359,33 @@ def test_only_the_ui_tree_is_served(client):
 def test_a_skill_without_a_ui_serves_nothing(client):
     install(client, make_zip({"SKILL.md": SKILL_MD, "rules.md": "r"}))
     assert client.get("/skills/reconcile/ui/index.html").status_code == 404
+
+
+# --- the author guide and its sample ----------------------------------------
+
+DOCS = Path(__file__).parent.parent / "docs"
+
+
+def test_the_guides_sample_skill_installs_and_serves_its_helper(client):
+    sample = DOCS / "examples" / "two-file-skill"
+    zipped = make_zip({str(p.relative_to(sample)): p.read_bytes() for p in sample.rglob("*") if p.is_file()})
+
+    assert install(client, zipped).status_code == 201
+    for path, mime in [
+        ("index.html", "text/html"),
+        ("app.js", "text/javascript"),
+        ("skill-ui.js", "text/javascript"),
+        ("style.css", "text/css"),
+    ]:
+        res = client.get(f"/skills/two-file-reconcile/ui/{path}")
+        assert res.status_code == 200, path
+        assert res.headers["content-type"].startswith(mime), path
+        assert res.headers["access-control-allow-origin"] == "*"
+    # The served CSP has no 'unsafe-inline', so an inline script or style would be dead.
+    page = client.get("/skills/two-file-reconcile/ui/index.html").text
+    assert "<style" not in page and not re.search(r"<script(?![^>]*\bsrc=)", page)
+
+
+def test_the_guide_embeds_the_sample_helper_verbatim():
+    helper = (DOCS / "examples" / "two-file-skill" / "ui" / "skill-ui.js").read_text()
+    assert helper in (DOCS / "skill-ui-contract.md").read_text()
