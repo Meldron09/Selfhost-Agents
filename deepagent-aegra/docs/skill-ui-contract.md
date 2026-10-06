@@ -40,11 +40,11 @@ In `SKILL.md`, refer to the inputs by the names you chose: the agent receives `f
 ## App to UI: `status`
 
 ```js
-{ type: "status", state: "running" }                         // "queued" | "running" | "done" | "failed"
+{ type: "status", state: "running" }                         // "queued" | "running" | "done" | "failed" | "cancelled"
 { type: "status", state: "failed", message: "Unsupported file type(s): photo.png. …" }
 ```
 
-The app sends nothing until a Run starts (nothing at load), and `queued` is sent while your Run waits behind another Skill Run (only one runs at a time, the rest start automatically in the order they were submitted), followed by `running` once it starts. `message` appears when the app refused the submission (for example an unsupported file) so you can show it and let the person submit again; a failure later in the Run arrives as `failed` with no `message`. Empty file slots are dropped, and a malformed `submit` (for example a non-File where a file belongs) is ignored with no reply. Listen only if you want to show progress.
+The app sends nothing until a Run starts (nothing at load), and `queued` is sent while your Run waits behind another Skill Run (only one runs at a time, the rest start automatically in the order they were submitted), followed by `running` once it starts. `cancelled` is sent when the person cancels the Run from the result panel (queued or running), so stop showing progress. `message` appears when the app refused the submission (for example an unsupported file) so you can show it and let the person submit again; a failure later in the Run arrives as `failed` with no `message`. Empty file slots are dropped, and a malformed `submit` (for example a non-File where a file belongs) is ignored with no reply. Listen only if you want to show progress.
 
 ## Copy-paste helper
 

@@ -18,7 +18,9 @@ One Skill Run is active at a time (issue #48, ADR-0011): `abefore_agent` first w
 turn at `_GATE`, a FIFO, emitting `{"skill_run_status": "queued"}` (only if it had to
 wait) and then `"running"` as custom stream events. The slot is released when the Run
 ends -- `aafter_agent`, or the exception that escapes a model or tool call (failure,
-cancellation, or an approval interrupt pausing the Run). A normal chat never touches it.
+cancellation, or an approval interrupt pausing the Run). Cancelling (issue #49) is that same
+path: a running Run is cancelled in its model or tool call, and a queued one while it waits
+at the gate, where it just leaves the line. A normal chat never touches it.
 """
 from __future__ import annotations
 

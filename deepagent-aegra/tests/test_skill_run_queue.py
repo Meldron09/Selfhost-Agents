@@ -164,3 +164,51 @@ def test_a_normal_chat_runs_alongside_the_active_skill_run():
 
     assert s.model_calls == ["a", "chat"]
     assert s.events["chat"] == []
+
+
+async def _cancelled(task):
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+
+def test_cancelling_the_running_run_frees_the_slot_and_starts_the_next_queued_run():
+    async def scenario():
+        s = Scenario(hold="a")
+        a = asyncio.create_task(s.submit("a"))
+        await s.active_is_in_its_model_call()
+        b = asyncio.create_task(s.submit("b"))
+        await s.until(lambda: s.events["b"] == ["queued"])
+
+        await _cancelled(a)
+        await asyncio.wait_for(b, 10)  # would hang if the cancelled Run had kept the slot
+        s.release_hold.set()
+        return s
+
+    s = asyncio.run(scenario())
+
+    assert s.model_calls == ["a", "b"]
+    assert s.events["b"] == ["queued", "running"]
+
+
+def test_cancelling_a_queued_run_removes_it_without_affecting_the_others():
+    async def scenario():
+        s = Scenario(hold="a")
+        a = asyncio.create_task(s.submit("a"))
+        await s.active_is_in_its_model_call()
+        b = asyncio.create_task(s.submit("b"))
+        await s.until(lambda: s.events["b"] == ["queued"])
+        c = asyncio.create_task(s.submit("c"))
+        await s.until(lambda: s.events["c"] == ["queued"])
+
+        await _cancelled(b)
+        assert s.model_calls == ["a"] and not a.done()  # the active Run is untouched
+
+        s.release_hold.set()
+        await asyncio.wait_for(asyncio.gather(a, c), 10)
+        return s
+
+    s = asyncio.run(scenario())
+
+    assert s.model_calls == ["a", "c"]  # b never started, c still runs
+    assert s.events == {"a": ["running"], "b": ["queued"], "c": ["queued", "running"]}
