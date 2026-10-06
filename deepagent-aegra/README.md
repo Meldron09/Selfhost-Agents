@@ -67,7 +67,7 @@ whenever a run's `configurable.enable_web_search` is on. See the parent spec:
 - `agent/skill_run.py` — `SkillRunMiddleware`: a Skill Run's `SKILL.md` body, `fields` JSON, uploaded
   files and reference files (registered as Attachments) injected into the Orchestrator's prompt, from
   `configurable.skill_run`, and the one-active-Skill-Run-at-a-time queue with its `skill_run_status` stream events
-  (issues #45, #48, docs/adr/0011)
+  (issues #45, #48, #50, docs/adr/0011); a Run paused for an `mcp` write approval frees its slot and re-queues on resume
 - `scripts/verify_stack.py` — PASS/FAIL check of the file store, the
   checkpointer, and Ollama reachability — kept out of `pytest`
 - `aegra-host/` — generic, project-agnostic `aegra serve` hosting scaffolding,

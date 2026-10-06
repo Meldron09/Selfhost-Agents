@@ -20,7 +20,8 @@ wait) and then `"running"` as custom stream events. The slot is released when th
 ends -- `aafter_agent`, or the exception that escapes a model or tool call (failure,
 cancellation, or an approval interrupt pausing the Run). Cancelling (issue #49) is that same
 path: a running Run is cancelled in its model or tool call, and a queued one while it waits
-at the gate, where it just leaves the line. A normal chat never touches it.
+at the gate, where it just leaves the line. A Run paused for an approval (issue #50) is the same
+exit; on resume `_retake_slot` queues it for a slot again. A normal chat never touches it.
 """
 from __future__ import annotations
 
@@ -70,6 +71,9 @@ class RunGate:
                 with contextlib.suppress(ValueError):
                     self._waiting.remove(entry)
             raise
+
+    def holds(self, run_id: str) -> bool:
+        return self._holder == run_id
 
     def _grant(self, run_id: str) -> None:
         self._holder = run_id
@@ -202,6 +206,19 @@ class SkillRunMiddleware(AgentMiddleware):
             _GATE.release(_run_id())
             raise
 
+    async def _retake_slot(self, state: dict) -> None:
+        """A Run paused for an approval gave its slot up (the interrupt escaped a tool call), and
+        resuming re-enters that tool call without re-running `abefore_agent`: wait for a slot again.
+        A Skill Run is told by its prepared context in state, not `configurable.skill_run`, which
+        the resume request does not repeat."""
+        if not state.get("skill_run_context"):
+            return
+        run_id, write = _run_id(), get_stream_writer()
+        if _GATE.holds(run_id):
+            return
+        await _GATE.acquire(run_id, lambda: write({"skill_run_status": "queued"}))
+        write({"skill_run_status": "running"})
+
     def wrap_tool_call(self, request, handler):
         try:
             return handler(request)
@@ -211,6 +228,7 @@ class SkillRunMiddleware(AgentMiddleware):
 
     async def awrap_tool_call(self, request, handler):
         try:
+            await self._retake_slot(request.state)
             return await handler(request)
         except BaseException:
             _GATE.release(_run_id())
