@@ -34,6 +34,24 @@ _Avoid_: "manifest", "server config" — Registry Entry ties it to the `server.j
 How a Connection's credentials get collected. Currently just **Credential Form** (paste a static secret — a GitHub PAT or an n8n access token, plus any non-secret fields like n8n's URL — no browser involved), used for the GitHub and n8n Connections. A second mode, **Device Code** (the auth window shows a short code and a verification URL, then polls until the person finishes signing in elsewhere), was designed for a since-deferred Microsoft 365 connection and would revive as a second content rendering of the same auth-window modal if that comes back.
 _Avoid_: "OAuth" alone for Device Code — both modes are ultimately backed by app credentials of some kind; Device Code specifically names the interactive polling flow.
 
+### Skills
+
+**Skill**:
+An installed folder holding a `SKILL.md`, optional reference files, and a Skill UI, which a person launches on demand. Its `SKILL.md` format is compatible with deepagents' own "skill" (a `SKILL.md` the model discovers and reads by itself), but a Skill here is user-launched, not model-discovered.
+_Avoid_: "workflow", "plugin", "template"
+
+**Skill UI**:
+The static web bundle in a Skill's `ui/` folder (entry `ui/index.html`, hand-written or built) that collects a person's inputs for a Skill Run. Shown in a sandboxed frame that cannot reach the network or the app directly. Authored ahead of time by a technical person, not generated at run time.
+_Avoid_: "form" (a Skill UI can be any interface), "generated UI"
+
+**Skill Run**:
+One one-shot execution of a Skill: the submitted inputs go to the Orchestrator in a thread hidden from the chat list, and it ends with a final message plus Outputs, with no follow-up turns. Can be cancelled, and can pause for an approval.
+_Avoid_: "job", "chat", "session"
+
+**Skill Library**:
+The set of Skills currently installed, kept on local disk and managed by uploading a Skill folder as a zip.
+_Avoid_: "marketplace", "registry" (a Registry Entry already means an MCP server record)
+
 ### Roles
 
 **Orchestrator**:

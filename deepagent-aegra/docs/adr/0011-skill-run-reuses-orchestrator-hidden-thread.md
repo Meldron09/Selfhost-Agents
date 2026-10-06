@@ -1,0 +1,20 @@
+# A Skill Run reuses the Orchestrator in a hidden thread, not a dedicated runner agent
+
+A Skill Run starts an ordinary thread on the existing Orchestrator, hidden from the chat list. The host injects the Skill's `SKILL.md` body as instructions, the submitted `fields` as a JSON block, the uploaded files as Attachments keyed by field name, and the Skill's reference files registered as Attachments under a "Skill reference files" heading. The run ends with a final message plus Outputs; there are no follow-up turns.
+
+## Why reuse
+
+The Orchestrator already routes to `file-reader`, `output-writer`, `web-search`, and `mcp`, resolves pointer-shaped files (ADR-0001, ADR-0004), gates web search per run (ADR-0007), and requires approval for non-read-only MCP tools (ADR-0008). A separate runner agent with its own tool allowlist would duplicate all of that. Reference files are restricted to the types `file-reader` already supports (.pdf .xlsx .xls .docx .pptx .txt .md).
+
+## Consequences
+
+- **Approvals pause the run.** An `mcp` write needs human approval, so the result panel must show the pending approval using the existing approval UI. Auto-rejecting would silently break any Skill that writes to GitHub or n8n. The pause/resume is a normal LangGraph interrupt held in the thread's checkpoint, so a hidden thread behaves like any other (covered by `tests/test_mcp_subagent.py`; not exercised live, since no MCP Connection was configured for the spike). The catch is on the frontend: `agent-chat-ui`'s `StreamProvider` is bound to the URL's `threadId` query param, and the approval UI reads from `useStreamContext()`. The result panel therefore needs its own `useStream` provider given the Run's thread id explicitly (make `StreamProvider` accept an optional `threadId` and skip the URL/thread-list side effects), then render the existing approval view inside it.
+- **Hiding the thread from the chat list.** The chat list is `threads.search({metadata: {graph_id}})`. aegra stamps `graph_id` onto every thread on each run (overwriting any client value), so a Skill Run thread matches that search. Custom metadata does survive: create the Run's thread with `metadata: {skill_run: true}` and have the chat list drop threads where `metadata.skill_run` is set (client-side filter; the search metadata filter is containment-only and cannot exclude). Verified live against aegra 0.10.7. The list asks for 100 threads, so hidden Runs share that page with chats; acceptable at the 50-Runs-per-Skill cap, revisit if it crowds out chats.
+- **Web search** uses the existing per-run toggle, shown on the launch panel and off by default. A Skill does not declare it.
+- **One active Skill Run at a time**, the rest queued in order. Ollama serves one local model, so parallel Runs would fight for it and for the context window. A normal chat can run alongside.
+- **History** records the Skill's name, install date, `fields`, Attachments, final message, and Outputs, capped at the last 50 Runs per Skill. It stores no snapshot of the Skill folder; a Run whose Skill was deleted or replaced is marked "removed" or "updated".
+- Runs can be cancelled.
+
+## Rejected
+
+A dedicated runner agent whose system prompt is `SKILL.md`, and a tools-only Run that bypasses the Orchestrator. Both give a Skill a narrower, separately maintained capability set for no gain at single-user scale.

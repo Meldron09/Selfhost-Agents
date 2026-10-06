@@ -1,0 +1,16 @@
+<!doctype html>
+<html><body>
+<h2>host</h2><div id="log"></div>
+<iframe id="f" sandbox="allow-scripts" style="width:600px;height:300px"></iframe>
+<script>
+const q = new URLSearchParams(location.search);
+const f = document.getElementById("f");
+f.src = `http://localhost:8001/skills/${q.get("v") ?? "demo"}/ui/index.html`;
+window.received = [];
+addEventListener("message", (e) => {
+  // origin is the string "null" for a sandboxed frame; identify by source instead
+  if (e.source !== f.contentWindow) return;
+  window.received.push({ origin: e.origin, data: e.data });
+  if (e.data.type === "submit") f.contentWindow.postMessage({ type: "status", state: "running" }, "*");
+});
+</script></body></html>
