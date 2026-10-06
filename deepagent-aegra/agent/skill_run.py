@@ -37,7 +37,7 @@ def _render(name: str, fields: dict, uploads: dict[str, list[dict]], references:
         "### Skill instructions",
         library.instructions(name),
         "### Inputs (fields)",
-        "```json\n" + json.dumps(fields, indent=2) + "\n```",
+        "```json\n" + json.dumps(fields, indent=2, ensure_ascii=False) + "\n```",
     ]
     uploaded = [(field, a) for field, files in uploads.items() for a in files]
     if uploaded:
@@ -47,7 +47,8 @@ def _render(name: str, fields: dict, uploads: dict[str, list[dict]], references:
         lines = "\n".join(f'- "{a["filename"]}" (key: {a["key"]})' for a in references)
         parts += [
             "### Skill reference files",
-            "Read these through `file-reader` only when the instructions need them.",
+            "These are the exception to reading every Attachment up front: do not delegate them to "
+            "`file-reader` until the instructions need one.",
             lines,
         ]
     return "\n\n".join(parts)

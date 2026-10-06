@@ -54,7 +54,7 @@ def test_the_model_call_receives_instructions_fields_uploads_and_reference_files
         {
             "skill_run": {
                 "name": "reconcile",
-                "fields": {"text": "Compare Q1 and Q2"},
+                "fields": {"text": " Compare Q1 – café "},
                 "files": {"files": [{"key": "up1.xlsx", "filename": "q1.xlsx"}]},
             }
         }
@@ -62,9 +62,10 @@ def test_the_model_call_receives_instructions_fields_uploads_and_reference_files
 
     assert "Compare them." in prompt  # the SKILL.md body ...
     assert "description: Reconcile" not in prompt  # ... without its frontmatter
-    assert '"text": "Compare Q1 and Q2"' in prompt  # fields, as a JSON block
-    assert '"q1.xlsx" (key: up1.xlsx)' in prompt and "files" in prompt  # upload, by field name
+    assert '"text": " Compare Q1 – café "' in prompt  # fields, verbatim, as a JSON block
+    assert '"q1.xlsx" (key: up1.xlsx)' in prompt and 'field "files"' in prompt  # upload, by field name
     assert "Skill reference files" in prompt and "rules/policy.md" in prompt
+    assert "not delegate them to `file-reader`" in prompt  # reference files are read on demand
     assert "ui/index.html" not in prompt  # the Skill UI is not a reference file
     assert result["messages"][-1].content == "All done."
 
