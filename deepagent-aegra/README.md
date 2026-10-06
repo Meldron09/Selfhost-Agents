@@ -63,7 +63,8 @@ whenever a run's `configurable.enable_web_search` is on. See the parent spec:
   (docs/adr/0004)
 - `agent/skills/` — the Skill Library: install (zip), replace, delete and list Skills as plain
   folders under `SKILL_LIBRARY_DIR`, served as `/skills`, plus each Skill's `ui/` tree sandbox-ready at
-  `/skills/{name}/ui/…` (issues #43, #44, #46; author guide: docs/skill-ui-contract.md)
+  `/skills/{name}/ui/…` (issues #43, #44, #46; author guide: docs/skill-ui-contract.md), and `history.py`, the Run history
+  records (last 50 per Skill, in a hidden `.runs/` folder of the library) served as `/skill-runs` (issue #51)
 - `agent/skill_run.py` — `SkillRunMiddleware`: a Skill Run's `SKILL.md` body, `fields` JSON, uploaded
   files and reference files (registered as Attachments) injected into the Orchestrator's prompt, from
   `configurable.skill_run`, and the one-active-Skill-Run-at-a-time queue with its `skill_run_status` stream events

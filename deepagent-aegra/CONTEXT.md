@@ -45,7 +45,7 @@ The static web bundle in a Skill's `ui/` folder (entry `ui/index.html`, hand-wri
 _Avoid_: "form" (a Skill UI can be any interface), "generated UI"
 
 **Skill Run**:
-One one-shot execution of a Skill: the submitted inputs go to the Orchestrator in a thread hidden from the chat list, and it ends with a final message plus Outputs, with no follow-up turns. Can be cancelled, and can pause for an approval.
+One one-shot execution of a Skill: the submitted inputs go to the Orchestrator in a thread hidden from the chat list, and it ends with a final message plus Outputs, with no follow-up turns. Can be cancelled, and can pause for an approval. Each is kept in its Skill's history (the last 50).
 _Avoid_: "job", "chat", "session"
 
 **Skill Library**:

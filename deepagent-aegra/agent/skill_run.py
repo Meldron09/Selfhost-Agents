@@ -35,9 +35,10 @@ from typing import Any
 from langchain.agents.middleware.types import AgentMiddleware, ModelRequest, ModelResponse
 from langchain_core.messages import SystemMessage
 from langgraph.config import get_config, get_stream_writer
+from langgraph.errors import GraphBubbleUp
 
 from agent.files.store import store_output_bytes
-from agent.skills import library
+from agent.skills import history, library
 
 
 class RunGate:
@@ -135,10 +136,26 @@ def _prepare(skill_run: dict[str, Any]) -> dict[str, Any]:
         {"key": store_output_bytes(rel, data), "filename": rel}
         for rel, data in library.reference_files(name).items()
     ]
+    context = _render(name, skill_run.get("fields") or {}, uploads, references)
+    history.start(_run_id(), skill_run)
     return {
         "attachments": [a for files in uploads.values() for a in files] + references,
-        "skill_run_context": _render(name, skill_run.get("fields") or {}, uploads, references),
+        "skill_run_context": context,
     }
+
+
+def _record_end(state: dict) -> None:
+    """Complete the Run's history record from its final state (a no-op for a normal chat)."""
+    if not state.get("skill_run_context"):
+        return
+    final = next((m.text for m in reversed(state.get("messages") or []) if m.type == "ai" and m.text.strip()), None)
+    history.finish(_run_id(), "done", final, state.get("outputs"))
+
+
+def _record_exit(exc: BaseException) -> None:
+    """A model or tool call raised: that ends the Run unless it is an approval pausing it."""
+    if not isinstance(exc, GraphBubbleUp):
+        history.finish(_run_id(), "cancelled" if isinstance(exc, asyncio.CancelledError) else "failed")
 
 
 def _skill_run(state: dict) -> dict[str, Any] | None:
@@ -184,9 +201,11 @@ class SkillRunMiddleware(AgentMiddleware):
     # time. The sync hooks below exist because langchain refuses a sync run with only an async twin.
     def after_agent(self, state, runtime) -> None:
         _GATE.release(_run_id())
+        _record_end(state)
 
     async def aafter_agent(self, state, runtime) -> None:
         _GATE.release(_run_id())
+        await asyncio.to_thread(_record_end, state)
 
     def wrap_model_call(
         self,
@@ -202,8 +221,9 @@ class SkillRunMiddleware(AgentMiddleware):
     ) -> ModelResponse:
         try:
             return await handler(_with_context(request))
-        except BaseException:
+        except BaseException as exc:
             _GATE.release(_run_id())
+            await asyncio.to_thread(_record_exit, exc)
             raise
 
     async def _retake_slot(self, state: dict) -> None:
@@ -222,14 +242,16 @@ class SkillRunMiddleware(AgentMiddleware):
     def wrap_tool_call(self, request, handler):
         try:
             return handler(request)
-        except BaseException:
+        except BaseException as exc:
             _GATE.release(_run_id())
+            _record_exit(exc)
             raise
 
     async def awrap_tool_call(self, request, handler):
         try:
             await self._retake_slot(request.state)
             return await handler(request)
-        except BaseException:
+        except BaseException as exc:
             _GATE.release(_run_id())
+            await asyncio.to_thread(_record_exit, exc)
             raise

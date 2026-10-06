@@ -32,6 +32,7 @@ from agent.config import get_settings
 from agent.files.store import load, save
 from agent.mcp.app import router as mcp_router
 from agent.skills.app import router as skills_router
+from agent.skills.app import runs_router as skill_runs_router
 
 
 def upload_file(file: UploadFile = File(...)) -> dict[str, str]:
@@ -72,14 +73,15 @@ def create_app() -> FastAPI:
     routes are disabled: FastAPI registers them as `async def` handlers,
     which would trip `test_no_route_handler_is_async`, and this app has no
     use for a docs UI. This is also aegra's one `http.app`, so it carries the
-    `/mcp/connections` (agent/mcp/app.py) and `/skills` (agent/skills/app.py)
-    routers next to `/files`.
+    `/mcp/connections` (agent/mcp/app.py), `/skills` and `/skill-runs`
+    (agent/skills/app.py) routers next to `/files`.
     """
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     app.add_api_route("/files", upload_file, methods=["POST"])
     app.add_api_route("/files/{key}", download_file, methods=["GET"])
     app.include_router(mcp_router)
     app.include_router(skills_router)
+    app.include_router(skill_runs_router)
     return app
 
 

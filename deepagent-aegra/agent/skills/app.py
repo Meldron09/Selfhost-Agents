@@ -37,6 +37,17 @@ or anything outside `ui/`.
 
 `DELETE /skills/{name}` -> `204`, the Skill is gone from the library and the
 list; `404` if there is no such Skill. Confirming is the UI's job.
+
+Run history (issue #51; written by `SkillRunMiddleware`, see agent/skills/history.py)
+--------------------------------------------------------------------------------
+`GET /skill-runs?skill=name` -> `200`, the recorded Skill Runs, newest first (all Skills'
+without `skill`; at most 50 per Skill are kept). Each is `{id, skill, startedAt, installedAt,
+fields, files, status, finalMessage, outputs, skillState}`: `files` maps a field name to its
+`{key, filename}` Attachments, `outputs` is `[{key, filename}]`, `status` is `running`, `done`,
+`failed` or `cancelled`, and `skillState` is `null`, `"removed"` (the Skill is deleted) or
+`"updated"` (it was replaced since the Run). Works for a Skill that no longer exists.
+
+`GET /skill-runs/{id}` -> `200`, one such record; `404` if there is none (id is the Run's thread id).
 """
 from __future__ import annotations
 
@@ -46,10 +57,11 @@ from typing import Any
 from fastapi import APIRouter, File, UploadFile
 from fastapi.responses import JSONResponse, Response
 
-from agent.skills import library
+from agent.skills import history, library
 from agent.skills.library import SkillError
 
 router = APIRouter(prefix="/skills")
+runs_router = APIRouter(prefix="/skill-runs")
 
 # A sandboxed frame has an opaque origin, so its own module scripts and assets load
 # cross-origin (needs the ACAO header), and the sandbox attribute alone leaves the API
@@ -113,3 +125,16 @@ def delete_skill(name: str) -> Response:
     except SkillError as exc:
         return _refusal(exc)
     return Response(status_code=204)
+
+
+@runs_router.get("")
+def list_skill_runs(skill: str | None = None) -> list[dict[str, Any]]:
+    return history.list_runs(skill)
+
+
+@runs_router.get("/{run_id}")
+def get_skill_run(run_id: str) -> Any:
+    record = history.get(run_id)
+    if record is None:
+        return JSONResponse({"error": f"No Skill Run with id {run_id!r}"}, status_code=404)
+    return record

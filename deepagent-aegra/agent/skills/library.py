@@ -8,6 +8,7 @@ nothing behind (and a refused `replace` leaves the old Skill as it was).
 """
 from __future__ import annotations
 
+import hashlib
 import io
 import re
 import shutil
@@ -173,6 +174,24 @@ def reference_files(name: str) -> dict[str, bytes]:
         and (rel := path.relative_to(folder).as_posix()) != "SKILL.md"
         and PurePosixPath(rel).parts[0] != "ui"
     }
+
+
+def fingerprint(name: str) -> str | None:
+    """A hash of everything in the installed Skill `name`, or `None` if it is not installed. Run
+    history keeps no snapshot of a Skill; comparing this tells a replaced Skill from the same one."""
+    folder = skill_library_dir() / name
+    if not _NAME.fullmatch(name) or not folder.is_dir():
+        return None
+    digest = hashlib.sha256()
+    for path in sorted(p for p in folder.rglob("*") if p.is_file()):
+        digest.update(path.relative_to(folder).as_posix().encode() + b"\0" + path.read_bytes() + b"\0")
+    return digest.hexdigest()
+
+
+def installed_at(name: str) -> float:
+    """When the Skill `name` was installed or last replaced (its `SKILL.md` is written at install)."""
+    get_skill(name)
+    return (skill_library_dir() / name / "SKILL.md").stat().st_mtime
 
 
 def ui_file(name: str, path: str) -> Path:

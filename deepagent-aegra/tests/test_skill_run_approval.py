@@ -15,7 +15,7 @@ from langgraph.types import Command
 
 import fake_mcp_server
 from agent import skill_run
-from agent.skills import library
+from agent.skills import history, library
 from tests.test_mcp_subagent import APPROVE, REJECT, _connect, _env, _reply, _Run  # noqa: F401  (_env is an autouse fixture)
 from tests.test_skills_app import SKILL_MD, make_zip
 
@@ -44,6 +44,16 @@ def test_a_write_pauses_the_run_and_approving_it_completes_the_run():
     assert fake_mcp_server.CALLS == []
     assert run.pending() and "__interrupt__" not in run.resume(APPROVE)
     assert fake_mcp_server.CALLS == ["write_thing"]
+
+
+def test_a_run_paused_for_an_approval_stays_running_in_history_until_it_finishes():
+    run = _SkillRun(("github_write_thing",))
+
+    run.start()
+    assert history.get("t1")["status"] == "running"  # paused, not failed
+
+    run.resume(APPROVE)
+    assert history.get("t1")["status"] == "done"
 
 
 def test_rejecting_the_write_runs_nothing_and_the_run_still_ends():
