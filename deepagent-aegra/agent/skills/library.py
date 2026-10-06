@@ -1,16 +1,17 @@
-"""Install and list Skills. The Skill Library is plain folders under
+"""Install, replace, delete and list Skills. The Skill Library is plain folders under
 `SKILL_LIBRARY_DIR` (its own volume, never under the served `FILE_STORE_DIR`);
 the list is derived from those folders, there is no index to keep in sync.
 
-`install` validates the whole zip in memory first, then unpacks to a hidden
+`install` and `replace` validate the whole zip in memory first, then unpacks to a hidden
 temp folder and renames it into place, so a refused or failed install leaves
-nothing behind.
+nothing behind (and a refused `replace` leaves the old Skill as it was).
 """
 from __future__ import annotations
 
 import io
 import re
 import shutil
+import threading
 import uuid
 import zipfile
 import zlib
@@ -32,6 +33,10 @@ _NAME = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 _FRONTMATTER = re.compile(r"\A---\r?\n(.*?)\r?\n---[ \t]*(?:\r?\n|\Z)", re.DOTALL)
 _JUNK_DIR = "__MACOSX"
 _JUNK_FILE = ".DS_Store"
+
+
+_write_lock = threading.Lock()
+# ponytail: one lock for every install/replace/delete (single-process, rare writes); per-name locks if that ever matters.
 
 
 class SkillError(Exception):
@@ -151,34 +156,72 @@ def get_skill(name: str) -> dict[str, Any]:
 
 
 def install(data: bytes) -> dict[str, Any]:
+    return _guarded(data, replacing=None)
+
+
+def replace(name: str, data: bytes) -> dict[str, Any]:
+    """Swap the Skill `name` for the zip in `data`; the old one stays unless the new one validates."""
+    get_skill(name)  # 404 before anything else
+    return _guarded(data, replacing=name)
+
+
+def delete(name: str) -> None:
+    """Remove the Skill folder `name`, even one whose SKILL.md is broken (else its name is stuck)."""
+    root = skill_library_dir()
+    with _write_lock:
+        if not _NAME.fullmatch(name) or not (root / name).is_dir():
+            raise SkillError(404, f"No Skill named {name!r}")
+        gone = root / f".deleted-{uuid.uuid4().hex}"
+        (root / name).rename(gone)  # out of the list at once; a failed rmtree strands only a hidden folder
+        shutil.rmtree(gone, ignore_errors=True)
+
+
+def _guarded(data: bytes, replacing: str | None) -> dict[str, Any]:
     try:
-        return _install(data)
+        with _write_lock:
+            return _install(data, replacing)
     except _CORRUPT:
         raise SkillError(422, "The zip is corrupt or uses an unsupported feature (such as a password)") from None
 
 
-def _install(data: bytes) -> dict[str, Any]:
+def _install(data: bytes, replacing: str | None) -> dict[str, Any]:
     archive, files, meta = _plan(data)
     root = skill_library_dir()
-    dest = root / meta["name"]
-    if dest.exists():
-        raise SkillError(409, f"A Skill named {meta['name']!r} already exists")
+    name = meta["name"]
+    dest = root / name
+    if replacing is not None and name != replacing:
+        raise SkillError(422, f"The zip is for the Skill {name!r}, not {replacing!r}")
+    if replacing is None and dest.exists():
+        raise SkillError(409, f"A Skill named {name!r} already exists")
+    if replacing is not None and not dest.is_dir():
+        raise SkillError(404, f"No Skill named {name!r}")
 
     root.mkdir(parents=True, exist_ok=True)
     tmp = root / f".installing-{uuid.uuid4().hex}"
+    old = root / f".replaced-{uuid.uuid4().hex}"
     try:
         for rel, info in files.items():
             target = tmp / rel
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(archive.read(info))
-        try:
-            tmp.rename(dest)
-        except OSError:
-            if not dest.exists():
+        if replacing is not None:
+            dest.rename(old)
+            try:
+                tmp.rename(dest)
+            except OSError:
+                old.rename(dest)
                 raise
-            raise SkillError(409, f"A Skill named {meta['name']!r} already exists") from None
+        else:
+            try:
+                tmp.rename(dest)
+            except OSError:
+                if not dest.exists():
+                    raise
+                raise SkillError(409, f"A Skill named {name!r} already exists") from None
     except (FileExistsError, NotADirectoryError):
         raise SkillError(422, "The zip has conflicting paths (a file and a folder share a name)") from None
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
-    return get_skill(meta["name"])
+        if dest.exists():  # keep `old` if a failed rollback left it as the only copy
+            shutil.rmtree(old, ignore_errors=True)
+    return get_skill(name)

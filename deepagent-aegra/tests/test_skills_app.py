@@ -196,3 +196,111 @@ def test_a_corrupt_entry_is_refused_and_writes_nothing(client, skills_dir):
 
 def test_conflicting_paths_are_refused_and_write_nothing(client, skills_dir):
     refused(client, skills_dir, make_zip({"SKILL.md": SKILL_MD, "a.md": "x", "a.md/b.md": "y"}), 422, "conflict")
+
+
+# --- replace ----------------------------------------------------------------
+
+
+def replace(client, name: str, data: bytes):
+    return client.put(f"/skills/{name}", files={"file": ("skill.zip", data, "application/zip")})
+
+
+def test_replace_swaps_in_the_new_version(client, skills_dir):
+    install(client, make_zip({"SKILL.md": SKILL_MD, "old.md": "old"}))
+
+    res = replace(client, "reconcile", make_zip({"SKILL.md": SKILL_MD.replace("two spreadsheets", "N sheets"), "new.md": "new"}))
+
+    assert res.status_code == 200
+    assert res.json() == {"name": "reconcile", "description": "Reconcile N sheets", "hasUi": False}
+    assert (skills_dir / "reconcile" / "new.md").read_text() == "new"
+    assert not (skills_dir / "reconcile" / "old.md").exists()
+    assert [p.name for p in skills_dir.iterdir()] == ["reconcile"]
+
+
+def test_an_invalid_replacement_leaves_the_old_skill_untouched(client, skills_dir):
+    install(client, make_zip({"SKILL.md": SKILL_MD, "keep.md": "original"}))
+
+    res = replace(client, "reconcile", make_zip({"SKILL.md": "no frontmatter", "other.md": "new"}))
+
+    assert res.status_code == 422
+    assert "frontmatter" in error(res)
+    assert (skills_dir / "reconcile" / "keep.md").read_text() == "original"
+    assert [p.name for p in skills_dir.iterdir()] == ["reconcile"]
+
+
+def test_a_corrupt_replacement_leaves_the_old_skill_untouched(client, skills_dir):
+    install(client, make_zip({"SKILL.md": SKILL_MD, "keep.md": "original"}))
+    data = make_zip({"SKILL.md": SKILL_MD, "ref.md": "unmistakable-content"})
+
+    res = replace(client, "reconcile", data.replace(b"unmistakable-content", b"unmistakable-contenX"))
+
+    assert res.status_code == 422
+    assert (skills_dir / "reconcile" / "keep.md").read_text() == "original"
+    assert [p.name for p in skills_dir.iterdir()] == ["reconcile"]
+
+
+def test_replace_refuses_a_zip_for_a_different_skill(client, skills_dir):
+    install(client, make_zip({"SKILL.md": SKILL_MD, "keep.md": "original"}))
+
+    res = replace(client, "reconcile", make_zip({"SKILL.md": SKILL_MD.replace("reconcile", "other")}))
+
+    assert res.status_code == 422
+    assert "other" in error(res) and "reconcile" in error(res)
+    assert [p.name for p in skills_dir.iterdir()] == ["reconcile"]
+    assert (skills_dir / "reconcile" / "keep.md").read_text() == "original"
+
+
+def test_replace_of_an_unknown_skill_is_404_and_installs_nothing(client, skills_dir):
+    res = replace(client, "reconcile", make_zip({"SKILL.md": SKILL_MD}))
+    assert res.status_code == 404
+    assert not skills_dir.exists() or list(skills_dir.iterdir()) == []
+
+
+# --- delete -----------------------------------------------------------------
+
+
+def test_delete_removes_the_skill_from_the_library_and_the_list(client, skills_dir):
+    install(client, make_zip({"SKILL.md": SKILL_MD, "ui/index.html": "x"}))
+
+    assert client.delete("/skills/reconcile").status_code == 204
+
+    assert client.get("/skills").json() == []
+    assert client.get("/skills/reconcile").status_code == 404
+    assert list(skills_dir.iterdir()) == []
+
+
+def test_delete_of_an_unknown_skill_is_404(client):
+    assert client.delete("/skills/nope").status_code == 404
+    assert client.delete("/skills/..").status_code == 404
+
+
+def test_a_deleted_name_can_be_installed_again(client):
+    install(client, make_zip({"SKILL.md": SKILL_MD}))
+    client.delete("/skills/reconcile")
+    assert install(client, make_zip({"SKILL.md": SKILL_MD})).status_code == 201
+
+
+def test_a_skill_with_a_broken_skill_md_can_still_be_deleted(client, skills_dir):
+    (skills_dir / "reconcile").mkdir(parents=True)
+    (skills_dir / "reconcile" / "SKILL.md").write_text("not frontmatter")
+
+    assert client.delete("/skills/reconcile").status_code == 204
+    assert install(client, make_zip({"SKILL.md": SKILL_MD})).status_code == 201
+
+
+def test_a_failed_swap_restores_the_old_skill(client, skills_dir, monkeypatch):
+    install(client, make_zip({"SKILL.md": SKILL_MD, "keep.md": "original"}))
+    real_rename = library.Path.rename
+
+    def flaky(self, target):
+        if self.name.startswith(".installing-"):
+            raise OSError("disk says no")
+        return real_rename(self, target)
+
+    monkeypatch.setattr(library.Path, "rename", flaky)
+    with pytest.raises(OSError):
+        replace(client, "reconcile", make_zip({"SKILL.md": SKILL_MD, "new.md": "new"}))
+    monkeypatch.undo()
+
+    assert (skills_dir / "reconcile" / "keep.md").read_text() == "original"
+    assert [p.name for p in skills_dir.iterdir()] == ["reconcile"]

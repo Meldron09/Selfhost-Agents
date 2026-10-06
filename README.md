@@ -12,7 +12,7 @@ Drop in a PDF, spreadsheet, Word doc, or slide deck and ask questions about it. 
 | **Make a file for you** | An `output-writer` agent builds an Excel, Word, PowerPoint, or text file and hands you a download link. |
 | **Research something online** | A `web-search` agent searches the web and reads pages. It's off by default, and you switch it on per message with the **Web Search** toggle. |
 | **Work with GitHub or n8n** | An `mcp` agent uses your connected GitHub account and n8n instance (set up once in **Settings**), so it can search repositories or run your n8n workflows. Anything that could change data asks for your approval first. |
-| **Keep reusable Skills** | Open **Skills** in the chat header to install a Skill by uploading it as a zip, and to see every installed Skill with its name and description. A bad zip is refused with the rule it broke. (Running a Skill comes in a later change.) |
+| **Keep reusable Skills** | Open **Skills** in the chat header to install a Skill by uploading it as a zip, see every installed Skill with its name and description, replace one by uploading a new zip (kept as it was if the new zip is refused), or delete one after a confirmation. A bad zip is refused with the rule it broke. (Running a Skill comes in a later change.) |
 
 A main **orchestrator** agent reads your request and hands each part to the right specialist. There is no code-execution sandbox: the agents can only use the tools listed above.
 

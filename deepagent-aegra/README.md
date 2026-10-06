@@ -61,8 +61,8 @@ whenever a run's `configurable.enable_web_search` is on. See the parent spec:
 - `agent/files/` — the upload/download HTTP app (`/files`), mounted
   alongside the Agent Protocol routes via `aegra-host/http_app_adapter.py`
   (docs/adr/0004)
-- `agent/skills/` — the Skill Library: install (zip) and list Skills as plain
-  folders under `SKILL_LIBRARY_DIR`, served as `/skills` (issue #43)
+- `agent/skills/` — the Skill Library: install (zip), replace, delete and list Skills as plain
+  folders under `SKILL_LIBRARY_DIR`, served as `/skills` (issues #43, #44)
 - `scripts/verify_stack.py` — PASS/FAIL check of the file store, the
   checkpointer, and Ollama reachability — kept out of `pytest`
 - `aegra-host/` — generic, project-agnostic `aegra serve` hosting scaffolding,
