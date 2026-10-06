@@ -22,6 +22,11 @@ cancellation, or an approval interrupt pausing the Run). Cancelling (issue #49) 
 path: a running Run is cancelled in its model or tool call, and a queued one while it waits
 at the gate, where it just leaves the line. A Run paused for an approval (issue #50) is the same
 exit; on resume `_retake_slot` queues it for a slot again. A normal chat never touches it.
+
+Run history (issue #51, agent/skills/history.py): `_prepare` records the Run once it holds a slot
+(a Run cancelled while queued leaves no record), `aafter_agent` completes it as `done` with the final
+message and Outputs, and a model or tool call that raises completes it as `failed` or `cancelled`,
+unless the exception is an approval interrupt pausing the Run, which leaves it `running`.
 """
 from __future__ import annotations
 
